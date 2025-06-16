@@ -1,2 +1,1 @@
-# Vulkan
-Vulkan
+This project renders a high-resolution 3D terrain model of the Moon using Vulkan. Based on NASA's LROC (Lunar Reconnaissance Orbiter Camera) dataset, the terrain is rendered with realistic lighting and texture mapping. The application is built from scratch in C++ and demonstrates advanced graphics pipeline control and resource management.
