@@ -179,7 +179,12 @@ struct UniformBufferObject {
 
 class TerrainRenderer {
 public:
-    void run() {
+    void run()
+    {
+        frameTimeLog.reserve(150000);
+		gpuTimeLog.reserve(150000);
+        fpsLog.reserve(500);
+
         initWindow();
         initVulkan();
         mainLoop();
@@ -249,6 +254,17 @@ private:
 
     bool framebufferResized = false;
 
+    // for logging
+	int numFrames = 0;  // for debugging
+	int routeCount = 0; // for debugging
+	int routeLimit = 5; // means num. routes is routeLimit + 1 
+	bool loggingDone = false; 
+    std::vector<double> frameTimeLog;
+    std::vector<float> fpsLog;
+    std::vector<double> gpuTimeLog;
+    VkQueryPool queryPool;
+    float timestampPeriod;
+
     void initWindow() {
         glfwInit();
 
@@ -288,31 +304,47 @@ private:
         createDescriptorPool();
         createDescriptorSets();
         createCommandBuffers();
+		createQueryPool(); // for gpu timing
         createSyncObjects();
     }
 
-    /*void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
-            glfwPollEvents();
-            drawFrame();
-        }
-
-        vkDeviceWaitIdle(device);
-    }*/
-    void mainLoop() {
+    void mainLoop()
+    {
         auto lastTime = std::chrono::high_resolution_clock::now();
+        auto renderLastTime = std::chrono::high_resolution_clock::now();
         int frames = 0;
 
-        while (!glfwWindowShouldClose(window)) {
+        while (!glfwWindowShouldClose(window))
+        {
+            uint64_t timestamps[2] = { 0, 0 };
+            VkResult queryResult = vkGetQueryPoolResults(
+                device, queryPool, currentFrame * 2, 2, sizeof(timestamps),
+                &timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
+            );
+
             glfwPollEvents();
             drawFrame();
 
             frames++;
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float elapsed = std::chrono::duration<float>(currentTime - lastTime).count();
+			numFrames++;
 
-            if (elapsed >= 1.0f) {
-                std::cout << "FPS: " << frames / elapsed << std::endl;
+            auto currentTime = std::chrono::high_resolution_clock::now();
+
+            double frameTimeSeconds = std::chrono::duration<double>(currentTime - renderLastTime).count();
+            if (routeCount <= routeLimit) frameTimeLog.push_back(frameTimeSeconds);
+            renderLastTime = currentTime;
+
+            if (queryResult == VK_SUCCESS && routeCount <= routeLimit) {
+                double gpuTimeSeconds = (double)(timestamps[1] - timestamps[0]) * timestampPeriod / 1e9;
+                gpuTimeLog.push_back(gpuTimeSeconds);
+            }
+
+            double elapsed = std::chrono::duration<double>(currentTime - lastTime).count();
+
+            if (elapsed >= 1.0) {
+                float currentFPS = frames / elapsed;
+                if (routeCount <= routeLimit) fpsLog.push_back(currentFPS);
+
                 frames = 0;
                 lastTime = currentTime;
             }
@@ -339,6 +371,7 @@ private:
 
     void cleanup() {
         cleanupSwapChain();
+        vkDestroyQueryPool(device, queryPool, nullptr);
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -465,10 +498,10 @@ private:
         }
     }
 
-    void pickPhysicalDevice() {
+    void pickPhysicalDevice()
+    {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-
         if (deviceCount == 0) {
             throw std::runtime_error("failed to find GPUs with Vulkan support!");
         }
@@ -482,10 +515,13 @@ private:
                 break;
             }
         }
-
         if (physicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("failed to find a suitable GPU!");
         }
+
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+        timestampPeriod = properties.limits.timestampPeriod;
     }
 
     void createLogicalDevice() {
@@ -1321,13 +1357,33 @@ private:
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    void createQueryPool()
+    {
+        VkQueryPoolCreateInfo queryPoolInfo{};
+        queryPoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        queryPoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        queryPoolInfo.queryCount = 2 * MAX_FRAMES_IN_FLIGHT;
+        if (vkCreateQueryPool(device, &queryPoolInfo, nullptr, &queryPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create query pool!");
+        }
+    }
+
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+    {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
+
+        // --- GPU Timing Start ---
+        // 1. Reset the query pool for the current frame's queries.
+        vkCmdResetQueryPool(commandBuffer, queryPool, currentFrame * 2, 2);
+
+        // 2. Write the starting timestamp before any rendering work.
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, currentFrame * 2);
+        // -------------------------
 
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1345,7 +1401,7 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // Main pipeline (moon terrain)
+        // --- All your drawing commands that you want to measure ---
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
         VkViewport viewport{};
@@ -1371,8 +1427,14 @@ private:
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        // --- End of drawing commands ---
 
         vkCmdEndRenderPass(commandBuffer);
+
+        // --- GPU Timing End ---
+        // 3. Write the ending timestamp after all rendering work is complete.
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currentFrame * 2 + 1);
+        // -----------------------
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
@@ -1418,6 +1480,19 @@ private:
         }
         else if (!movingForward && cameraPosition.y < -14000.0f) {
             movingForward = true; 
+			routeCount++;
+
+			if (routeCount > routeLimit) {
+				// exit the program
+				std::cout << ">>>> Route completed. num frames: " << numFrames << std::endl;
+
+                if (!loggingDone)
+                {
+					savePerformanceLogsToFile();
+					loggingDone = true;
+                }
+                glfwSetWindowShouldClose(window, true);
+			}
         }
 
         glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
@@ -1694,6 +1769,57 @@ private:
         }
 
         return true;
+    }
+
+    void savePerformanceLogsToFile() {
+		std::cout << ">>>> Saving performance logs to file..." << std::endl;
+		std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
+		std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
+
+        // Generate a single timestamp for all files.
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::tm time_info;
+        localtime_s(&time_info, &in_time_t);
+        std::stringstream ss;
+        ss << std::put_time(&time_info, "%Y%m%d_%H%M%S");
+        std::string timestamp = ss.str();
+
+        // render time
+        if (!frameTimeLog.empty()) {
+            std::string filename = "frame_times_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "render time\n";
+                for (const auto& time : frameTimeLog) { dataFile << time << "\n"; }
+                dataFile.close();
+                std::cout << ">> App-level frame times saved to " << filename << "\n";
+            }
+        }
+
+        // FPS Log
+        if (!fpsLog.empty()) {
+            std::string filename = "fps_log_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "FPS\n";
+                for (const auto& fps : fpsLog) { dataFile << fps << "\n"; }
+                dataFile.close();
+                std::cout << ">> Per-second FPS log saved to " << filename << "\n";
+            }
+        }
+
+        // GPU Time Log
+        if (!gpuTimeLog.empty()) {
+            std::string filename = "gpu_times_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "GPU time\n";
+                for (const auto& time : gpuTimeLog) { dataFile << time << "\n"; }
+                dataFile.close();
+                std::cout << ">> GPU execution times saved to " << filename << "\n";
+            }
+        }
     }
 
     static std::vector<char> readFile(const std::string& filename) {
