@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -31,12 +32,15 @@
 #include <set>
 #include <unordered_map>
 
+// for smooth camera movement, lerp, slerp
+#include <glm/gtx/compatibility.hpp>
+
 const uint32_t WIDTH = 1200;
 const uint32_t HEIGHT = 900;
 
-const std::string MODEL_PATH = "models/moon_low_res.obj";
+const std::string MODEL_PATH = "models/apollo11-400.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";
-const std::string TEXTURE_PATH = "textures/diffuse_map_8k.png";
+const std::string TEXTURE_PATH = "textures/diffuse_map_8k.png"; // not being used
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -86,6 +90,16 @@ struct SwapChainSupportDetails {
     std::vector<VkPresentModeKHR> presentModes;
 };
 
+// A structure to hold the calculated min/max coordinates.
+struct BoundingBox {
+    glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
+    glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
+
+    // apollo11 bb info
+    // Min Coords : vec3(-2100.000000, -13965.000000, -196.031570)
+	// Max Coords : vec3(2100.000000, 13965.000000, 196.031570)
+};
+
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
@@ -133,9 +147,19 @@ struct Vertex {
     }
 };
 
-struct TextVertex {
-    glm::vec2 pos;
-};
+BoundingBox calculateBoundingBox(const std::vector<Vertex>& allVertices) {
+    BoundingBox bbox;
+    for (const auto& vertex : allVertices) {
+        bbox.min.x = std::min(bbox.min.x, vertex.pos.x);
+        bbox.min.y = std::min(bbox.min.y, vertex.pos.y);
+        bbox.min.z = std::min(bbox.min.z, vertex.pos.z);
+
+        bbox.max.x = std::max(bbox.max.x, vertex.pos.x);
+        bbox.max.y = std::max(bbox.max.y, vertex.pos.y);
+        bbox.max.z = std::max(bbox.max.z, vertex.pos.z);
+    }
+    return bbox;
+}
 
 namespace std {
     template<> struct hash<Vertex> {
@@ -147,14 +171,20 @@ namespace std {
 }
 
 struct UniformBufferObject {
-    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 model = glm::mat4(1.0f);
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+	alignas(16) glm::vec4 cameraPosition;
 };
 
 class TerrainRenderer {
 public:
-    void run() {
+    void run()
+    {
+        frameTimeLog.reserve(150000);
+		gpuTimeLog.reserve(150000);
+        fpsLog.reserve(500);
+
         initWindow();
         initVulkan();
         mainLoop();
@@ -218,14 +248,29 @@ private:
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
 
+    glm::vec3 cameraPos = glm::vec3(100.0f, 100.0f, 50.0f);
+    glm::vec3 cameraFront = glm::normalize(glm::vec3(0.0f, 0.0f, -1.0f));
+    glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
     bool framebufferResized = false;
+
+    // for logging
+	int numFrames = 0;  // for debugging
+	int routeCount = 0; // for debugging
+	int routeLimit = 5; // means num. routes is routeLimit + 1 
+	bool loggingDone = false; 
+    std::vector<double> frameTimeLog;
+    std::vector<float> fpsLog;
+    std::vector<double> gpuTimeLog;
+    VkQueryPool queryPool;
+    float timestampPeriod;
 
     void initWindow() {
         glfwInit();
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Moon Terrain Vulkan", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Terrain Renderer - Vulkan", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
@@ -259,31 +304,47 @@ private:
         createDescriptorPool();
         createDescriptorSets();
         createCommandBuffers();
+		createQueryPool(); // for gpu timing
         createSyncObjects();
     }
 
-    /*void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
-            glfwPollEvents();
-            drawFrame();
-        }
-
-        vkDeviceWaitIdle(device);
-    }*/
-    void mainLoop() {
+    void mainLoop()
+    {
         auto lastTime = std::chrono::high_resolution_clock::now();
+        auto renderLastTime = std::chrono::high_resolution_clock::now();
         int frames = 0;
 
-        while (!glfwWindowShouldClose(window)) {
+        while (!glfwWindowShouldClose(window))
+        {
+            uint64_t timestamps[2] = { 0, 0 };
+            VkResult queryResult = vkGetQueryPoolResults(
+                device, queryPool, currentFrame * 2, 2, sizeof(timestamps),
+                &timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
+            );
+
             glfwPollEvents();
             drawFrame();
 
             frames++;
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float elapsed = std::chrono::duration<float>(currentTime - lastTime).count();
+			numFrames++;
 
-            if (elapsed >= 1.0f) {
-                std::cout << "FPS: " << frames / elapsed << std::endl;
+            auto currentTime = std::chrono::high_resolution_clock::now();
+
+            double frameTimeSeconds = std::chrono::duration<double>(currentTime - renderLastTime).count();
+            if (routeCount <= routeLimit) frameTimeLog.push_back(frameTimeSeconds);
+            renderLastTime = currentTime;
+
+            if (queryResult == VK_SUCCESS && routeCount <= routeLimit) {
+                double gpuTimeSeconds = (double)(timestamps[1] - timestamps[0]) * timestampPeriod / 1e9;
+                gpuTimeLog.push_back(gpuTimeSeconds);
+            }
+
+            double elapsed = std::chrono::duration<double>(currentTime - lastTime).count();
+
+            if (elapsed >= 1.0) {
+                float currentFPS = frames / elapsed;
+                if (routeCount <= routeLimit) fpsLog.push_back(currentFPS);
+
                 frames = 0;
                 lastTime = currentTime;
             }
@@ -310,6 +371,7 @@ private:
 
     void cleanup() {
         cleanupSwapChain();
+        vkDestroyQueryPool(device, queryPool, nullptr);
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -436,10 +498,10 @@ private:
         }
     }
 
-    void pickPhysicalDevice() {
+    void pickPhysicalDevice()
+    {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-
         if (deviceCount == 0) {
             throw std::runtime_error("failed to find GPUs with Vulkan support!");
         }
@@ -453,10 +515,13 @@ private:
                 break;
             }
         }
-
         if (physicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("failed to find a suitable GPU!");
         }
+
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+        timestampPeriod = properties.limits.timestampPeriod;
     }
 
     void createLogicalDevice() {
@@ -477,6 +542,7 @@ private:
 
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
+        deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -687,7 +753,8 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
+        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -1064,6 +1131,17 @@ private:
                 indices.push_back(uniqueVertices[vertex]);
             }
         }
+        if (!vertices.empty()) {
+            BoundingBox modelBBox = calculateBoundingBox(vertices);
+
+            std::cout << "--- Model Bounding Box ---" << std::endl;
+            std::cout << "Min Coords: " << glm::to_string(modelBBox.min) << std::endl;
+            std::cout << "Max Coords: " << glm::to_string(modelBBox.max) << std::endl;
+            std::cout << "--------------------------" << std::endl;
+        }
+        else {
+            std::cerr << "Warning: Model loaded but no vertices found to analyse." << std::endl;
+        }
     }
 
     void createVertexBuffer() {
@@ -1281,13 +1359,33 @@ private:
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    void createQueryPool()
+    {
+        VkQueryPoolCreateInfo queryPoolInfo{};
+        queryPoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        queryPoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        queryPoolInfo.queryCount = 2 * MAX_FRAMES_IN_FLIGHT;
+        if (vkCreateQueryPool(device, &queryPoolInfo, nullptr, &queryPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create query pool!");
+        }
+    }
+
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+    {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
+
+        // --- GPU Timing Start ---
+        // 1. Reset the query pool for the current frame's queries.
+        vkCmdResetQueryPool(commandBuffer, queryPool, currentFrame * 2, 2);
+
+        // 2. Write the starting timestamp before any rendering work.
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, currentFrame * 2);
+        // -------------------------
 
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1305,7 +1403,7 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // Main pipeline (moon terrain)
+        // --- All your drawing commands that you want to measure ---
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
         VkViewport viewport{};
@@ -1331,8 +1429,14 @@ private:
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        // --- End of drawing commands ---
 
         vkCmdEndRenderPass(commandBuffer);
+
+        // --- GPU Timing End ---
+        // 3. Write the ending timestamp after all rendering work is complete.
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currentFrame * 2 + 1);
+        // -----------------------
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
@@ -1360,20 +1464,66 @@ private:
         }
     }
 
-    void updateUniformBuffer(uint32_t currentImage) {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
+    void updateUniformBuffer(uint32_t currentImage)
+    {
+        static auto lastTime = std::chrono::high_resolution_clock::now();
         auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+        lastTime = currentTime;
+
+        static glm::vec3 cameraPosition = glm::vec3(0.0f, -14000.0f, 100.0f);
+        static bool movingForward = true;
 
         UniformBufferObject ubo{};
-        ubo.model = glm::rotate(glm::mat4(1.0f), time * 0.1f * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        //ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.view = glm::lookAt(glm::vec3(100.0f, 100.0f, 50.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        //ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
-        ubo.proj = glm::perspective(glm::radians(70.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 1000.0f);
+        const float cameraSpeed = 100.0f;
+
+        if (movingForward && cameraPosition.y > 11500.0f) {
+            movingForward = false; 
+        }
+        else if (!movingForward && cameraPosition.y < -14000.0f) {
+            movingForward = true; 
+			routeCount++;
+
+			if (routeCount > routeLimit) {
+				// exit the program
+				std::cout << ">>>> Route completed. num frames: " << numFrames << std::endl;
+
+                if (!loggingDone)
+                {
+					savePerformanceLogsToFile();
+					loggingDone = true;
+                }
+                glfwSetWindowShouldClose(window, true);
+			}
+        }
+
+        glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
+        cameraPosition += forwardDirection * cameraSpeed * deltaTime;
+		cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); // No lateral movement
+
+        //std::cout << "z coord " << (cameraPosition.z) << std::endl;
+
+        glm::vec3 cameraTarget = cameraPosition + glm::vec3(0.0f, 1.0f, 0.0f);
+        //glm::vec3 cameraTarget = cameraPosition + forwardDirection;
+        glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
+
+        ubo.model = glm::mat4(1.0f);
+
+        ubo.view = glm::lookAt(cameraPosition, cameraTarget, upVector);
+
+        constexpr float fov = glm::radians(30.0f);
+        float aspect = swapChainExtent.width / (float)swapChainExtent.height;
+        float nearPlane = 0.1f;
+        float farPlane = 4000.0f; // Increased from 1000.0f
+        ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
+
+        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
         ubo.proj[1][1] *= -1;
 
+        // Pass the camera's world position to the shader (useful for lighting calculations).
+        ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
+
+        // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1533,7 +1683,8 @@ private:
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-        return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
+        // Ensure the device supports wireframe rendering (non-solid fill mode).
+        return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.fillModeNonSolid;
     }
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
@@ -1621,6 +1772,57 @@ private:
         }
 
         return true;
+    }
+
+    void savePerformanceLogsToFile() {
+		std::cout << ">>>> Saving performance logs to file..." << std::endl;
+		std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
+		std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
+
+        // Generate a single timestamp for all files.
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::tm time_info;
+        localtime_s(&time_info, &in_time_t);
+        std::stringstream ss;
+        ss << std::put_time(&time_info, "%Y%m%d_%H%M%S");
+        std::string timestamp = ss.str();
+
+        // render time
+        if (!frameTimeLog.empty()) {
+            std::string filename = "frame_times_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "render time\n";
+                for (const auto& time : frameTimeLog) { dataFile << time << "\n"; }
+                dataFile.close();
+                std::cout << ">> App-level frame times saved to " << filename << "\n";
+            }
+        }
+
+        // FPS Log
+        if (!fpsLog.empty()) {
+            std::string filename = "fps_log_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "FPS\n";
+                for (const auto& fps : fpsLog) { dataFile << fps << "\n"; }
+                dataFile.close();
+                std::cout << ">> Per-second FPS log saved to " << filename << "\n";
+            }
+        }
+
+        // GPU Time Log
+        if (!gpuTimeLog.empty()) {
+            std::string filename = "gpu_times_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "GPU time\n";
+                for (const auto& time : gpuTimeLog) { dataFile << time << "\n"; }
+                dataFile.close();
+                std::cout << ">> GPU execution times saved to " << filename << "\n";
+            }
+        }
     }
 
     static std::vector<char> readFile(const std::string& filename) {
