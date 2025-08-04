@@ -41,8 +41,7 @@ const uint32_t HEIGHT = 900;
 
 const std::string MODEL_PATH = "models/apollo11-2500.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";
-const std::string TEXTURE_PATH = "textures/apollo11_16bit_v2.png";
-//const std::string TEXTURE_PATH = "textures/apollo11_8bit.png";
+const std::string TEXTURE_PATH = "textures/apollo11_16bit.png";
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -254,8 +253,12 @@ private:
 
     // For perspective-to-topdown transition
     float transitionFactor = 0.0f; // 0.0 = perspective, 1.0 = top-down
-    bool isTransitioning = false;
+    bool isInteracting = false;
     double lastY = 0.0;
+
+	// horizontal camera movement
+	double lastX = 0.0;
+	float yaw = 0.0f; // Horizontal rotation around the Y-axis
 
     glm::vec3 cameraPos = glm::vec3(100.0f, 100.0f, 50.0f);
     glm::vec3 cameraFront = glm::normalize(glm::vec3(0.0f, 0.0f, -1.0f));
@@ -338,6 +341,7 @@ private:
             );
 
             glfwPollEvents();
+			processKeyboardInput();
             drawFrame();
 
             frames++;
@@ -1143,51 +1147,99 @@ private:
 
     void loadModel()
     {
-        tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-        std::string warn, err;
+        const float halfX = 2100.0f;
+        const float halfY = 13965.0f;
+        float aspectRatio = halfY / halfX;
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
-            throw std::runtime_error(warn + err);
-        }
+		const int grid = 128; // Number of patches in each direction
+        const int gridX = 128;
+        const int gridY = static_cast<int>(gridX * (2.0f * halfY / (2.0f * halfX))); 
 
-        // Load vertices without an index buffer ---
-        vertices.clear();
-        for (const auto& shape : shapes) {
-            for (const auto& index : shape.mesh.indices) {
-                Vertex vertex{};
-                vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
-                vertex.normal = {
-                    attrib.normals[3 * index.normal_index + 0],
-                    attrib.normals[3 * index.normal_index + 1],
-                    attrib.normals[3 * index.normal_index + 2]
-                };
-                vertex.texCoord = {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                };
-                vertex.color = { 1.0f, 1.0f, 1.0f };
-                vertices.push_back(vertex);
+        std::vector<Vertex> vertexList;
+
+        for (int y = 0; y <= grid; ++y) {
+            for (int x = 0; x <= grid; ++x) {
+                float u = static_cast<float>(x) / grid;
+                float v = static_cast<float>(y) / grid;
+
+                float posX = -halfX + u * 2.0f * halfX;
+                float posY = -halfY + v * 2.0f * halfY;
+
+                vertexList.push_back({
+                    { posX, posY, 0.0f },
+                    { 1.0f, 1.0f, 1.0f },
+                    { 0.0f, 0.0f, 1.0f },
+                    { u, v }
+                    });
             }
         }
 
-        if (!vertices.empty()) {
-            modelBbox = calculateBoundingBox(vertices);
+        vertices.clear();
+        for (int y = 0; y < grid; ++y) {
+            for (int x = 0; x < grid; ++x) {
+                int i0 = (y) * (grid + 1) + (x);
+                int i1 = (y) * (grid + 1) + (x + 1);
+                int i2 = (y + 1) * (grid + 1) + (x);
+                int i3 = (y + 1) * (grid + 1) + (x + 1);
 
-            std::cout << "--- Model Bounding Box ---" << std::endl;
-            std::cout << "Min Coords: " << glm::to_string(modelBbox.min) << std::endl;
-            std::cout << "Max Coords: " << glm::to_string(modelBbox.max) << std::endl;
-            std::cout << "--------------------------" << std::endl;
+                vertices.push_back(vertexList[i2]); // top-left
+                vertices.push_back(vertexList[i3]); // top-right
+                vertices.push_back(vertexList[i0]); // bottom-left
+                vertices.push_back(vertexList[i1]); // bottom-right
+            }
         }
-        else {
-            std::cerr << "Warning: Model loaded but no vertices found to analyse." << std::endl;
-        }
+
+        std::cout << "Generated terrain: " << gridX << " x " << gridY
+            << " patches, total vertices: " << vertices.size() << std::endl;
     }
+
+    //void loadModel()
+    //{
+    //    tinyobj::attrib_t attrib;
+    //    std::vector<tinyobj::shape_t> shapes;
+    //    std::vector<tinyobj::material_t> materials;
+    //    std::string warn, err;
+
+    //    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
+    //        throw std::runtime_error(warn + err);
+    //    }
+
+    //    // Load vertices without an index buffer ---
+    //    vertices.clear();
+    //    for (const auto& shape : shapes) {
+    //        for (const auto& index : shape.mesh.indices) {
+    //            Vertex vertex{};
+    //            vertex.pos = {
+    //                attrib.vertices[3 * index.vertex_index + 0],
+    //                attrib.vertices[3 * index.vertex_index + 1],
+    //                attrib.vertices[3 * index.vertex_index + 2]
+    //            };
+    //            vertex.normal = {
+    //                attrib.normals[3 * index.normal_index + 0],
+    //                attrib.normals[3 * index.normal_index + 1],
+    //                attrib.normals[3 * index.normal_index + 2]
+    //            };
+    //            vertex.texCoord = {
+    //                attrib.texcoords[2 * index.texcoord_index + 0],
+    //                1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+    //            };
+    //            vertex.color = { 1.0f, 1.0f, 1.0f };
+    //            vertices.push_back(vertex);
+    //        }
+    //    }
+
+    //    if (!vertices.empty()) {
+    //        modelBbox = calculateBoundingBox(vertices);
+
+    //        std::cout << "--- Model Bounding Box ---" << std::endl;
+    //        std::cout << "Min Coords: " << glm::to_string(modelBbox.min) << std::endl;
+    //        std::cout << "Max Coords: " << glm::to_string(modelBbox.max) << std::endl;
+    //        std::cout << "--------------------------" << std::endl;
+    //    }
+    //    else {
+    //        std::cerr << "Warning: Model loaded but no vertices found to analyse." << std::endl;
+    //    }
+    //}
 
     void createVertexBuffer() {
         VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
@@ -1435,6 +1487,7 @@ private:
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
         // Use vkCmdDraw instead of vkCmdDrawIndexed 
+        //vkCmdDraw(commandBuffer, 4, 1, 0, 0); // for tessellation we draw 4 vertices directly
         vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
@@ -1530,19 +1583,20 @@ private:
 
     void updateUniformBuffer(uint32_t currentImage)
     {
-        // State A: Perspective View (side view)
-        glm::vec3 pos_perspective = glm::vec3(0.0f, -25000.0f, 5000.0f);
+        // State A: Perspective View (now dynamic based on yaw for rotation)
+        glm::vec3 pos_perspective;
+        float perspective_radius = 25000.0f; // The distance from the center for the side view
+        pos_perspective.x = cameraTarget.x + perspective_radius * sin(glm::radians(yaw));
+        pos_perspective.y = cameraTarget.y + perspective_radius * cos(glm::radians(yaw));
+        pos_perspective.z = cameraTarget.z +5000.0f; // Keep a fixed elevation for the side view
         glm::vec3 up_perspective = glm::vec3(0.0f, 0.0f, 1.0f); // Z is up
 
         // State B: Top-Down View
-        // Position is directly above the target, distance controlled by zoom
         glm::vec3 pos_top_down = cameraTarget + glm::vec3(0.0f, 0.0f, cameraDistance);
-        // When looking straight down the Z-axis, the "up" direction for the camera can be along Y
-        glm::vec3 up_top_down = glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::vec3 up_top_down = glm::vec3(0.0f, -1.0f, 0.0f);
 
         // Interpolate camera position and up vector based on the transitionFactor
         this->cameraPos = glm::lerp(pos_perspective, pos_top_down, transitionFactor);
-
         this->cameraUp = glm::normalize(glm::lerp(up_perspective, up_top_down, transitionFactor));
 
         UniformBufferObject ubo{};
@@ -1553,7 +1607,6 @@ private:
 
         // Projection matrix setup
         float aspect = swapChainExtent.width / (float)swapChainExtent.height;
-        // Far plane must be large enough to see the model when zoomed out
         ubo.proj = glm::perspective(glm::radians(30.0f), aspect, 0.1f, 60000.0f);
         ubo.proj[1][1] *= -1; // Vulkan's Y-coordinate is inverted
 
@@ -1853,37 +1906,55 @@ private:
         }
     }
 
+    void processKeyboardInput()
+    {
+        // Adjust this value to change how fast the camera pans up and down
+        const float cameraPanSpeed = 10.0f;
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+            cameraTarget.y -= cameraPanSpeed;
+        }
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+            cameraTarget.y += cameraPanSpeed;
+        }
+    }
+
     static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
         auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(window));
         if (button == GLFW_MOUSE_BUTTON_LEFT) {
             if (action == GLFW_PRESS) {
-                app->isTransitioning = true;
-                glfwGetCursorPos(window, nullptr, &app->lastY);
+                app->isInteracting = true;
+                // Capture both X and Y cursor positions
+                glfwGetCursorPos(window, &app->lastX, &app->lastY);
             }
             else if (action == GLFW_RELEASE) {
-                app->isTransitioning = false;
+                app->isInteracting = false;
             }
         }
     }
 
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
         auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(window));
-        if (!app->isTransitioning) {
+        if (!app->isInteracting) {
             return;
         }
 
-        // Calculate vertical mouse movement
+        // Calculate horizontal and vertical mouse movement since last frame
+        float xoffset = static_cast<float>(xpos - app->lastX);
         float yoffset = static_cast<float>(ypos - app->lastY);
+        app->lastX = xpos;
         app->lastY = ypos;
 
-        // Update the transition factor based on mouse drag
-        // Dragging down increases the factor (moves to top-down), dragging up decreases it
-        float sensitivity = 0.005f;
-        app->transitionFactor += yoffset * sensitivity;
+        // Horizontal movement (left/right) controls yaw rotation
+        float rotationSensitivity = 0.15f;
+        app->yaw += xoffset * rotationSensitivity;
 
-        // Clamp the factor between 0.0 and 1.0
-        if (app->transitionFactor > 1.0f) app->transitionFactor = 1.0f;
-        if (app->transitionFactor < 0.0f) app->transitionFactor = 0.0f;
+        // Vertical movement (up/down) controls transition to top-down view
+        float transitionSensitivity = 0.005f;
+        app->transitionFactor += yoffset * transitionSensitivity;
+
+        // Clamp the transition factor between 0.0 and 1.0
+        app->transitionFactor = std::clamp(app->transitionFactor, 0.0f, 1.0f);
     }
 
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
@@ -1894,8 +1965,8 @@ private:
         app->cameraDistance -= static_cast<float>(yoffset) * zoomSpeed;
 
         // Constrain zoom distance
-        if (app->cameraDistance < 2000.0f) {
-            app->cameraDistance = 2000.0f;
+        if (app->cameraDistance < 100.0f) {
+            app->cameraDistance = 100.0f;
         }
         if (app->cameraDistance > 50000.0f) {
             app->cameraDistance = 50000.0f;
