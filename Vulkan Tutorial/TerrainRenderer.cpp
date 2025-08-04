@@ -1149,18 +1149,16 @@ private:
     {
         const float halfX = 2100.0f;
         const float halfY = 13965.0f;
-        float aspectRatio = halfY / halfX;
 
-		const int grid = 128; // Number of patches in each direction
-        const int gridX = 128;
-        const int gridY = static_cast<int>(gridX * (2.0f * halfY / (2.0f * halfX))); 
+        const int grid = 128; // Number of patches in each direction
+        const int gridY = 128 * 7; // Number of patches in each direction
 
         std::vector<Vertex> vertexList;
 
-        for (int y = 0; y <= grid; ++y) {
+        for (int y = 0; y <= gridY; ++y) {
             for (int x = 0; x <= grid; ++x) {
                 float u = static_cast<float>(x) / grid;
-                float v = static_cast<float>(y) / grid;
+                float v = static_cast<float>(y) / gridY;
 
                 float posX = -halfX + u * 2.0f * halfX;
                 float posY = -halfY + v * 2.0f * halfY;
@@ -1175,7 +1173,7 @@ private:
         }
 
         vertices.clear();
-        for (int y = 0; y < grid; ++y) {
+        for (int y = 0; y < gridY; ++y) {
             for (int x = 0; x < grid; ++x) {
                 int i0 = (y) * (grid + 1) + (x);
                 int i1 = (y) * (grid + 1) + (x + 1);
@@ -1188,9 +1186,6 @@ private:
                 vertices.push_back(vertexList[i1]); // bottom-right
             }
         }
-
-        std::cout << "Generated terrain: " << gridX << " x " << gridY
-            << " patches, total vertices: " << vertices.size() << std::endl;
     }
 
     //void loadModel()

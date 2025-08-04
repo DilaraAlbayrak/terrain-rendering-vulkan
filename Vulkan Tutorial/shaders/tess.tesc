@@ -38,6 +38,7 @@ void main() {
         float d2 = length(v2.xyz);
         float d3 = length(v3.xyz);
 
+        // normalize distances to a range between MIN_DISTANCE and MAX_DISTANCE
         float dist0 = clamp((d0 - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0.0, 1.0);
         float dist1 = clamp((d1 - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0.0, 1.0);
         float dist2 = clamp((d2 - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0.0, 1.0);
@@ -53,6 +54,7 @@ void main() {
         gl_TessLevelOuter[2] = tessLevel2;
         gl_TessLevelOuter[3] = tessLevel3;
 
+        // calculate inner quad tessellation levels
         gl_TessLevelInner[0] = max(tessLevel1, tessLevel3);
         gl_TessLevelInner[1] = max(tessLevel0, tessLevel2);
     }
