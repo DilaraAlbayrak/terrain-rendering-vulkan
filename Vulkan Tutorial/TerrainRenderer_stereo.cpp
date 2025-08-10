@@ -171,10 +171,10 @@ namespace std {
 }
 
 struct UniformBufferObject {
-    alignas(16) glm::mat4 model = glm::mat4(1.0f);
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-    alignas(16) glm::vec4 cameraPosition;
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 view[2];
+    alignas(16) glm::mat4 proj[2];
+    alignas(16) glm::vec4 cameraPosition[2]; 
 };
 
 class TerrainRenderer {
@@ -540,9 +540,22 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceFeatures deviceFeatures{};
-        deviceFeatures.samplerAnisotropy = VK_TRUE;
-        deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
+        // mono rendering
+        //VkPhysicalDeviceFeatures deviceFeatures{};
+        //deviceFeatures.samplerAnisotropy = VK_TRUE;
+        //deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
+
+        VkPhysicalDeviceMultiviewFeatures multiviewFeatures{};
+        multiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
+        multiviewFeatures.multiview = VK_TRUE; // Enable the multiview feature, gl_ViewIndex 
+        //multiviewFeatures.multiviewTessellationShader = VK_TRUE;
+
+		VkPhysicalDeviceFeatures2 deviceFeatures2{}; // VkPhysicalDeviceFeatures2 is extended version of VkPhysicalDeviceFeatures
+		deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		deviceFeatures2.pNext = &multiviewFeatures; // Link the multiview features to the device features chain.
+		vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
+		deviceFeatures2.features.samplerAnisotropy = VK_TRUE;
+		deviceFeatures2.features.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -550,7 +563,9 @@ private:
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
-        createInfo.pEnabledFeatures = &deviceFeatures;
+        //createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.pNext = &deviceFeatures2;
+        createInfo.pEnabledFeatures = nullptr; // this must be null when pNext is used
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -583,7 +598,8 @@ private:
         createInfo.imageFormat = surfaceFormat.format;
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
-        createInfo.imageArrayLayers = 1;
+        //createInfo.imageArrayLayers = 1;
+		createInfo.imageArrayLayers = 2; // Enable stereo rendering by setting imageArrayLayers to 2.
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
@@ -619,7 +635,7 @@ private:
         swapChainImageViews.resize(swapChainImages.size());
 
         for (uint32_t i = 0; i < swapChainImages.size(); i++) {
-            swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+            swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 2);
         }
     }
 
@@ -666,8 +682,18 @@ private:
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
+        const uint32_t viewMask = 0b00000011; // 0b11 means enable view 0 and view 1
+
+        VkRenderPassMultiviewCreateInfo multiviewCreateInfo{};
+        multiviewCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
+        multiviewCreateInfo.subpassCount = 1;
+        multiviewCreateInfo.pViewMasks = &viewMask;
+        multiviewCreateInfo.correlationMaskCount = 1;
+        multiviewCreateInfo.pCorrelationMasks = &viewMask;
+
         std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
         VkRenderPassCreateInfo renderPassInfo{};
+		renderPassInfo.pNext = &multiviewCreateInfo; // Link the multiview create info to the render pass create info.
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
         renderPassInfo.pAttachments = attachments.data();
@@ -708,8 +734,8 @@ private:
     }
 
     void createGraphicsPipeline() {
-        auto vertShaderCode = readFile("shaders/vert.spv");
-        auto fragShaderCode = readFile("shaders/frag.spv");
+        auto vertShaderCode = readFile("shaders/stereoV.spv");
+        auto fragShaderCode = readFile("shaders/stereoF.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -847,7 +873,8 @@ private:
             framebufferInfo.pAttachments = attachments.data();
             framebufferInfo.width = swapChainExtent.width;
             framebufferInfo.height = swapChainExtent.height;
-            framebufferInfo.layers = 1;
+            //framebufferInfo.layers = 1;
+			framebufferInfo.layers = 2; // Enable stereo rendering by setting layers to 2.
 
             if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create framebuffer!");
@@ -871,8 +898,15 @@ private:
     void createDepthResources() {
         VkFormat depthFormat = findDepthFormat();
 
-        createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-        depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+        /*createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+        depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);*/
+
+        createImage(swapChainExtent.width, swapChainExtent.height, 2, // stero view
+            depthFormat, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+
+        depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 2); // stereo view
     }
 
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
@@ -903,38 +937,8 @@ private:
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
 
-    void createTextureImage() {
-        int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-        if (!pixels) {
-            throw std::runtime_error("failed to load texture image!");
-        }
-
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
-        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-        void* data;
-        vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-        memcpy(data, pixels, static_cast<size_t>(imageSize));
-        vkUnmapMemory(device, stagingBufferMemory);
-
-        stbi_image_free(pixels);
-
-        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
-
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        vkDestroyBuffer(device, stagingBuffer, nullptr);
-        vkFreeMemory(device, stagingBufferMemory, nullptr);
-    }
-
     void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, 2);
     }
 
     void createTextureSampler() {
@@ -961,17 +965,18 @@ private:
         }
     }
 
-    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
+    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t layerCount) {
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        // Set viewType based on the layer count for flexibility
+        viewInfo.viewType = (layerCount > 1) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = format;
         viewInfo.subresourceRange.aspectMask = aspectFlags;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
         viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        viewInfo.subresourceRange.layerCount = layerCount; // Use the parameter here
 
         VkImageView imageView;
         if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
@@ -981,7 +986,7 @@ private:
         return imageView;
     }
 
-    void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+    void createImage(uint32_t width, uint32_t height, uint32_t arrayLayers, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -989,7 +994,7 @@ private:
         imageInfo.extent.height = height;
         imageInfo.extent.depth = 1;
         imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
+        imageInfo.arrayLayers = arrayLayers; // Use the parameter here
         imageInfo.format = format;
         imageInfo.tiling = tiling;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1509,19 +1514,29 @@ private:
 
         ubo.model = glm::mat4(1.0f);
 
-        ubo.view = glm::lookAt(cameraPosition, cameraTarget, upVector);
+		float ipd = 0.064f * 100; // Interpupillary distance, deliberately exaggerated
+		float centre = ipd * 0.5f;
 
         constexpr float fov = glm::radians(30.0f);
         float aspect = swapChainExtent.width / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
         float farPlane = 4000.0f; // Increased from 1000.0f
-        ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
+        glm::vec3 viewDir = cameraTarget - cameraPosition;
+        glm::vec3 rightDir = glm::normalize(glm::cross(viewDir, glm::vec3(0.0f, 0.0f, 1.0f)));
 
-        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
-        ubo.proj[1][1] *= -1;
+		// left eye position
+		glm::vec3 leftEyePosition = cameraPosition - rightDir * centre;
+        ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + viewDir, glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj[0] = glm::perspective(fov, aspect, nearPlane, farPlane);
+        ubo.proj[0][1][1] *= -1;
+		ubo.cameraPosition[0] = glm::vec4(leftEyePosition, 1.0f);
 
-        // Pass the camera's world position to the shader (useful for lighting calculations).
-        ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
+		// right eye position
+		glm::vec3 rightEyePosition = cameraPosition + rightDir * centre;
+		ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + viewDir, glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj[1] = glm::perspective(fov, aspect, nearPlane, farPlane);
+		ubo.proj[1][1][1] *= -1;
+		ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
 
         // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));

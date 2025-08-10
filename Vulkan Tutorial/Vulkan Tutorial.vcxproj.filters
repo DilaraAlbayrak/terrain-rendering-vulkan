@@ -18,16 +18,35 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Tutorial.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
     <None Include="Pseudocode.cpp">
       <Filter>Source Files</Filter>
     </None>
     <None Include="main.cpp">
       <Filter>Source Files</Filter>
+    </None>
+    <None Include="shaders\terrain.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\terrain.tesc">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\terrain.tese">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\terrain.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\shader.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\shader.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\stereo.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\stereo.vert">
+      <Filter>Shaders</Filter>
     </None>
     <None Include="shaders\s.frag">
       <Filter>Shaders</Filter>
@@ -35,11 +54,30 @@
     <None Include="shaders\s.vert">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="shaders\text.frag">
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="TerrainRenderer_stereo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_wireframe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="shaders\tess.vert">
       <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\text.vert">
+    </CustomBuild>
+    <CustomBuild Include="shaders\tess.frag">
       <Filter>Shaders</Filter>
-    </None>
+    </CustomBuild>
+    <CustomBuild Include="shaders\tess.tesc">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\tess.tese">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\s.comp">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

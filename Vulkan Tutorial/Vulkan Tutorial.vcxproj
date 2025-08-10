@@ -112,13 +112,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\914607\Workspace\Software\tinyobjloader-release;C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Include;C:\Users\914607\Workspace\Software\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories);C:\Users\914607\Workspace\Software\stb-master</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>d:\Software\tinyobjloader-release;D:\VulkanSDK\1.4.313.1\Include;D:\Software\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories);D:\Software\stb-master</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\914607\Workspace\Software\glfw-3.4.bin.WIN64\lib-vc2022;C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>D:\Software\glfw-3.4.bin.WIN64\lib-vc2022;D:\VulkanSDK\1.4.313.1\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -130,7 +130,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\914607\Workspace\Software\tinyobjloader-release;C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Include;C:\Users\914607\Workspace\Software\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories);C:\Users\914607\Workspace\Software\stb-master</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>d:\Software\tinyobjloader-release;D:\VulkanSDK\1.4.313.1\Include;D:\Software\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories);D:\Software\stb-master</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
@@ -138,18 +138,87 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\914607\Workspace\Software\glfw-3.4.bin.WIN64\lib-vc2022;C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>D:\Software\glfw-3.4.bin.WIN64\lib-vc2022;D:\VulkanSDK\1.4.313.1\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="main.cpp" />
-    <ClCompile Include="Tutorial.cpp" />
     <None Include="Pseudocode.cpp" />
+    <CustomBuild Include="shaders\s.comp">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "%(FullPath)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling Shader %(Filename)%(Extension)</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+    </CustomBuild>
     <None Include="shaders\s.frag" />
     <None Include="shaders\s.vert" />
-    <None Include="shaders\text.frag" />
-    <None Include="shaders\text.vert" />
+    <None Include="shaders\shader.frag" />
+    <None Include="shaders\shader.vert" />
+    <None Include="shaders\stereo.frag" />
+    <None Include="shaders\stereo.vert" />
+    <None Include="shaders\terrain.frag" />
+    <None Include="shaders\terrain.tesc" />
+    <None Include="shaders\terrain.tese" />
+    <None Include="shaders\terrain.vert" />
+    <CustomBuild Include="shaders\tess.frag">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "%(FullPath)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "$(ProjectDir)shaders\%(Filename)%(Extension)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling Shader %(Identity)</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling Shader %(Filename)%(Extension)</Message>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </CustomBuild>
+    <CustomBuild Include="shaders\tess.tesc">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "%(FullPath)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "$(ProjectDir)shaders\%(Filename)%(Extension)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling Shader %(Identity)</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling Shader %(Filename)%(Extension)</Message>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </CustomBuild>
+    <CustomBuild Include="shaders\tess.tese">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "%(FullPath)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "$(ProjectDir)shaders\%(Filename)%(Extension)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling Shader %(Identity)</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling Shader %(Filename)%(Extension)</Message>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </CustomBuild>
+    <CustomBuild Include="shaders\tess.vert">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "%(FullPath)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">"D:\VulkanSDK\1.4.313.1\Bin\glslc.exe" "$(ProjectDir)shaders\%(Filename)%(Extension)" -o "$(ProjectDir)shaders\%(Filename).spv"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling Shader %(Identity)</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)shaders\%(Filename).spv</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling Shader %(Filename)%(Extension)</Message>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="TerrainRenderer_stereo.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_wireframe.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
