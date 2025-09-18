@@ -1,6 +1,11 @@
 #version 450
-#extension GL_EXT_multiview : require
 
+// Push constant block to receive the view index from the C++ code
+layout(push_constant) uniform PushConstants {
+    int viewIndex;
+} pushConstants;
+
+// The UBO structure remains the same
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
     mat4 view[2];
@@ -14,11 +19,11 @@ layout(location = 2) in vec3 inNormal;
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec3 fragPosition;
-layout(location = 2) out vec3 fragViewDir;
 
 void main() {
     fragNormal = normalize(inNormal); 
     fragPosition = vec3(ubo.model * vec4(inPosition, 1.0));
-    fragViewDir = normalize(ubo.cameraPosition[gl_ViewIndex].xyz - fragPosition); 
-    gl_Position = ubo.proj[gl_ViewIndex] * ubo.view[gl_ViewIndex] * ubo.model * vec4(inPosition, 1.0);
+
+    // Use the viewIndex from the push constant instead of gl_ViewIndex
+    gl_Position = ubo.proj[pushConstants.viewIndex] * ubo.view[pushConstants.viewIndex] * ubo.model * vec4(inPosition, 1.0);
 }

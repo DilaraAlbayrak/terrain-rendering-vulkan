@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_multiview : require
 
 layout(vertices = 4) out;
 
@@ -8,13 +9,12 @@ layout(location = 1) in vec2 inTexCoord[];
 layout(location = 0) out vec3 outPosition[];
 layout(location = 1) out vec2 outTexCoord[];
 
-layout(binding = 0) uniform UniformBufferObject {
+layout(std140, binding = 0) uniform UniformBufferObject {
     mat4 model;
-    mat4 view;
-    mat4 proj;
-    vec4 cameraPosition;
-    float minZ;
-    float maxZ;
+    mat4 view[2];
+    mat4 proj[2];
+    vec4 cameraPosition[2];
+    vec4 minMaxZ;
 } ubo;
 
 const float MIN_DISTANCE = 1.0;
@@ -32,11 +32,11 @@ void main() {
         const float MIN_DISTANCE_SQ = MIN_DISTANCE * MIN_DISTANCE;
         const float MAX_DISTANCE_SQ = MAX_DISTANCE * MAX_DISTANCE;
 
-        // dot() instead of length() for distance squared
-        vec4 v0 = ubo.view * vec4(inPosition[0], 1.0);
-        vec4 v1 = ubo.view * vec4(inPosition[1], 1.0);
-        vec4 v2 = ubo.view * vec4(inPosition[2], 1.0);
-        vec4 v3 = ubo.view * vec4(inPosition[3], 1.0);
+        // Use gl_ViewIndex instead of pushConstants.viewIndex
+        vec4 v0 = ubo.view[gl_ViewIndex] * ubo.model * vec4(inPosition[0], 1.0);
+        vec4 v1 = ubo.view[gl_ViewIndex] * ubo.model * vec4(inPosition[1], 1.0);
+        vec4 v2 = ubo.view[gl_ViewIndex] * ubo.model * vec4(inPosition[2], 1.0);
+        vec4 v3 = ubo.view[gl_ViewIndex] * ubo.model * vec4(inPosition[3], 1.0);
 
         float d0_sq = dot(v0.xyz, v0.xyz);
         float d1_sq = dot(v1.xyz, v1.xyz);
@@ -57,7 +57,6 @@ void main() {
         gl_TessLevelOuter[1] = tessLevel1;
         gl_TessLevelOuter[2] = tessLevel2;
         gl_TessLevelOuter[3] = tessLevel3;
-    
         gl_TessLevelInner[0] = max(tessLevel1, tessLevel3);
         gl_TessLevelInner[1] = max(tessLevel0, tessLevel2);
     }

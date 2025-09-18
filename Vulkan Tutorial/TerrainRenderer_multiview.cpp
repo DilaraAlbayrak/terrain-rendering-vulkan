@@ -34,14 +34,13 @@
 
 // for smooth camera movement, lerp, slerp
 #include <glm/gtx/compatibility.hpp>
-#include <glm/gtx/quaternion.hpp>
 
-const uint32_t WIDTH = 1200;
-const uint32_t HEIGHT = 900;
+const uint32_t WIDTH = 1800 + 50; // +50 for the gap between stereo view
+const uint32_t HEIGHT = 1000;
 
-const std::string MODEL_PATH = "models/apollo11-2500.obj";
+const std::string MODEL_PATH = "models/apollo11-49.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";
-const std::string TEXTURE_PATH = "textures/apollo11_16bit.png";
+const std::string TEXTURE_PATH = "textures/diffuse_map_8k.png"; // not being used
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -104,19 +103,21 @@ struct BoundingBox {
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
+    //glm::vec2 texCoord;
     glm::vec3 normal;
-    glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
         bindingDescription.binding = 0;
         bindingDescription.stride = sizeof(Vertex);
         bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
         return bindingDescription;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions{};
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
+
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
         attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -127,21 +128,22 @@ struct Vertex {
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
+        /* attributeDescriptions[2].binding = 0;
+         attributeDescriptions[2].location = 2;
+         attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+         attributeDescriptions[2].offset = offsetof(Vertex, texCoord);*/
+
         attributeDescriptions[2].binding = 0;
         attributeDescriptions[2].location = 2;
         attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[2].offset = offsetof(Vertex, normal);
 
-        attributeDescriptions[3].binding = 0;
-        attributeDescriptions[3].location = 3;
-        attributeDescriptions[3].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[3].offset = offsetof(Vertex, texCoord);
-
         return attributeDescriptions;
     }
 
     bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && normal == other.normal && texCoord == other.texCoord;
+        //return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal;
+        return pos == other.pos && color == other.color && normal == other.normal;
     }
 };
 
@@ -162,18 +164,17 @@ BoundingBox calculateBoundingBox(const std::vector<Vertex>& allVertices) {
 namespace std {
     template<> struct hash<Vertex> {
         size_t operator()(Vertex const& vertex) const {
-            return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^ (hash<glm::vec3>()(vertex.normal) << 1) ^ (hash<glm::vec2>()(vertex.texCoord) << 1);
+            return (((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1)
+                ^ (hash<glm::vec2>()(vertex.normal) << 1));
         }
     };
 }
 
 struct UniformBufferObject {
-    alignas(16) glm::mat4 model = glm::mat4(1.0f);
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-    alignas(16) glm::vec4 cameraPosition;
-    alignas(4) float minZ = -196.42f;
-    alignas(4) float maxZ = 196.42;
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 view[2];
+    alignas(16) glm::mat4 proj[2];
+    alignas(16) glm::vec4 cameraPosition[2];
 };
 
 class TerrainRenderer {
@@ -227,11 +228,11 @@ private:
     VkSampler textureSampler;
 
     std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
-    // std::vector<uint32_t> indices;
-    // VkBuffer indexBuffer;
-    // VkDeviceMemory indexBufferMemory;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
@@ -247,24 +248,10 @@ private:
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
 
-    // for camera movement/rotation by mouse
-    glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);
-    float cameraDistance = 25000.0f; // Used for zoom, initial distance
-
-    // For perspective-to-topdown transition
-    float transitionFactor = 0.0f; // 0.0 = perspective, 1.0 = top-down
-    bool isInteracting = false;
-    double lastY = 0.0;
-
-	// horizontal camera movement
-	double lastX = 0.0;
-	float yaw = 0.0f; // Horizontal rotation around the Y-axis
-
     glm::vec3 cameraPos = glm::vec3(100.0f, 100.0f, 50.0f);
     glm::vec3 cameraFront = glm::normalize(glm::vec3(0.0f, 0.0f, -1.0f));
     glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-
-    BoundingBox modelBbox;
+    float cameraSpeed = 1000.0f;
 
     bool framebufferResized = false;
 
@@ -289,10 +276,20 @@ private:
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 
-        // register mouse callbacks
-        glfwSetMouseButtonCallback(window, mouseButtonCallback);
-        glfwSetCursorPosCallback(window, cursorPosCallback);
-        glfwSetScrollCallback(window, scrollCallback);
+        glfwSetKeyCallback(window, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
+            // Retrieve the application instance inside the lambda
+            auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(win));
+
+            // The same toggle logic as before
+            if (key == GLFW_KEY_SPACE && action == GLFW_PRESS) {
+                if (app->cameraSpeed > 0.0f) {
+                    app->cameraSpeed = 0.0f;
+                }
+                else {
+                    app->cameraSpeed = 100.0f;
+                }
+            }
+            });
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -314,16 +311,17 @@ private:
         createCommandPool();
         createDepthResources();
         createFramebuffers();
-        createTextureImage(); // Load heightmap
-        createTextureImageView();
-        createTextureSampler();
-        loadModel(); // Load low-poly control mesh
+        //createTextureImage();
+        //createTextureImageView();
+        //createTextureSampler();
+        loadModel();
         createVertexBuffer();
+        createIndexBuffer();
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
         createCommandBuffers();
-        createQueryPool();
+        createQueryPool(); // for gpu timing
         createSyncObjects();
     }
 
@@ -388,46 +386,60 @@ private:
         vkDestroyImageView(device, depthImageView, nullptr);
         vkDestroyImage(device, depthImage, nullptr);
         vkFreeMemory(device, depthImageMemory, nullptr);
+
         for (auto framebuffer : swapChainFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
+
         for (auto imageView : swapChainImageViews) {
             vkDestroyImageView(device, imageView, nullptr);
         }
+
         vkDestroySwapchainKHR(device, swapChain, nullptr);
     }
 
     void cleanup() {
         cleanupSwapChain();
+        vkDestroyQueryPool(device, queryPool, nullptr);
+
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyRenderPass(device, renderPass, nullptr);
+
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroyBuffer(device, uniformBuffers[i], nullptr);
             vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
         }
+
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        vkDestroySampler(device, textureSampler, nullptr);
+
+        /*vkDestroySampler(device, textureSampler, nullptr);
         vkDestroyImageView(device, textureImageView, nullptr);
         vkDestroyImage(device, textureImage, nullptr);
-        vkFreeMemory(device, textureImageMemory, nullptr);
+        vkFreeMemory(device, textureImageMemory, nullptr);*/
+
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        // vkDestroyBuffer(device, indexBuffer, nullptr);
-        // vkFreeMemory(device, indexBufferMemory, nullptr);
+        vkDestroyBuffer(device, indexBuffer, nullptr);
+        vkFreeMemory(device, indexBufferMemory, nullptr);
         vkDestroyBuffer(device, vertexBuffer, nullptr);
         vkFreeMemory(device, vertexBufferMemory, nullptr);
+
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
+
         vkDestroyCommandPool(device, commandPool, nullptr);
         vkDestroyDevice(device, nullptr);
+
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
         }
+
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
+
         glfwDestroyWindow(window);
         glfwTerminate();
     }
@@ -439,16 +451,18 @@ private:
             glfwGetFramebufferSize(window, &width, &height);
             glfwWaitEvents();
         }
+
         vkDeviceWaitIdle(device);
+
         cleanupSwapChain();
+
         createSwapChain();
         createImageViews();
         createDepthResources();
         createFramebuffers();
     }
 
-    void createInstance()
-    {
+    void createInstance() {
         if (enableValidationLayers && !checkValidationLayerSupport()) {
             throw std::runtime_error("validation layers requested, but not available!");
         }
@@ -488,8 +502,7 @@ private:
         }
     }
 
-    void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo)
-    {
+    void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
         createInfo = {};
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -514,14 +527,17 @@ private:
         }
     }
 
-    void pickPhysicalDevice() {
+    void pickPhysicalDevice()
+    {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
         if (deviceCount == 0) {
             throw std::runtime_error("failed to find GPUs with Vulkan support!");
         }
+
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+
         for (const auto& device : devices) {
             if (isDeviceSuitable(device)) {
                 physicalDevice = device;
@@ -531,12 +547,18 @@ private:
         if (physicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("failed to find a suitable GPU!");
         }
+
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+        timestampPeriod = properties.limits.timestampPeriod;
     }
 
     void createLogicalDevice() {
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
         float queuePriority = 1.0f;
         for (uint32_t queueFamily : uniqueQueueFamilies) {
             VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -547,35 +569,30 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        // Enable tessellation shader feature
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
-        //deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
-        deviceFeatures.tessellationShader = VK_TRUE; // Enable tessellation
+        //deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
+
         createInfo.pEnabledFeatures = &deviceFeatures;
+
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
-        if (enableValidationLayers) {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
-        }
-        else {
-            createInfo.enabledLayerCount = 0;
-        }
+
         if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
             throw std::runtime_error("failed to create logical device!");
         }
+
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
     }
 
-    void createSwapChain()
-    {
+    void createSwapChain() {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
 
         VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
@@ -627,16 +644,15 @@ private:
         swapChainExtent = extent;
     }
 
-    void createImageViews()
-    {
+    void createImageViews() {
         swapChainImageViews.resize(swapChainImages.size());
+
         for (uint32_t i = 0; i < swapChainImages.size(); i++) {
             swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
         }
     }
 
-    void createRenderPass()
-    {
+    void createRenderPass() {
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = swapChainImageFormat;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -694,24 +710,20 @@ private:
         }
     }
 
-    // Find this function in your TerrainRenderer.cpp file
     void createDescriptorSetLayout() {
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
         uboLayoutBinding.descriptorCount = 1;
         uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         uboLayoutBinding.pImmutableSamplers = nullptr;
-        // The UBO is needed in the TCS and TES. This is correct.
-        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
         VkDescriptorSetLayoutBinding samplerLayoutBinding{};
         samplerLayoutBinding.binding = 1;
         samplerLayoutBinding.descriptorCount = 1;
         samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
-        // CRITICAL CHANGE: The sampler is needed in the TES (for displacement)
-        // AND now also in the Fragment Shader (for normal calculation).
-        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; // <--- UPDATE THIS LINE
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -725,16 +737,11 @@ private:
     }
 
     void createGraphicsPipeline() {
-        // Load all four shader stages ---
-        auto vertShaderCode = readFile("shaders/tess.vert.spv");
-        auto fragShaderCode = readFile("shaders/tess.frag.spv");
-        auto tescShaderCode = readFile("shaders/tess.tesc.spv");
-        auto teseShaderCode = readFile("shaders/tess.tese.spv");
+        auto vertShaderCode = readFile("shaders/multiviewV.spv");
+        auto fragShaderCode = readFile("shaders/multiviewF.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
-        VkShaderModule tescShaderModule = createShaderModule(tescShaderCode);
-        VkShaderModule teseShaderModule = createShaderModule(teseShaderCode);
 
         VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
         vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -742,46 +749,29 @@ private:
         vertShaderStageInfo.module = vertShaderModule;
         vertShaderStageInfo.pName = "main";
 
-        VkPipelineShaderStageCreateInfo tescShaderStageInfo{};
-        tescShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        tescShaderStageInfo.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-        tescShaderStageInfo.module = tescShaderModule;
-        tescShaderStageInfo.pName = "main";
-
-        VkPipelineShaderStageCreateInfo teseShaderStageInfo{};
-        teseShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        teseShaderStageInfo.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
-        teseShaderStageInfo.module = teseShaderModule;
-        teseShaderStageInfo.pName = "main";
-
         VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
         fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         fragShaderStageInfo.module = fragShaderModule;
         fragShaderStageInfo.pName = "main";
 
-        std::array<VkPipelineShaderStageCreateInfo, 4> shaderStages = { vertShaderStageInfo, tescShaderStageInfo, teseShaderStageInfo, fragShaderStageInfo };
+        VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
         auto bindingDescription = Vertex::getBindingDescription();
         auto attributeDescriptions = Vertex::getAttributeDescriptions();
-        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
         vertexInputInfo.vertexBindingDescriptionCount = 1;
-        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
         vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
         vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        // Use a patch list for tessellation
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-        // Tessellation state
-        VkPipelineTessellationStateCreateInfo tessellationState{};
-        tessellationState.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
-        tessellationState.patchControlPoints = 4; // We are using quad patches
 
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -792,7 +782,7 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Keep wireframe to see tessellation
+        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
@@ -827,28 +817,38 @@ private:
         colorBlending.blendConstants[2] = 0.0f;
         colorBlending.blendConstants[3] = 0.0f;
 
-        std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        std::vector<VkDynamicState> dynamicStates = {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR
+        };
         VkPipelineDynamicStateCreateInfo dynamicState{};
         dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        // Define the push constant range (for multipass)
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // It will be used in the vertex shader
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(int); // We are pushing a single integer (viewIndex)
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+        pipelineLayoutInfo.pushConstantRangeCount = 1; // Specify we are using one push constant range
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange; // Point to our range
+
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
         }
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-        pipelineInfo.pStages = shaderStages.data();
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
         pipelineInfo.pVertexInputState = &vertexInputInfo;
         pipelineInfo.pInputAssemblyState = &inputAssembly;
-        // Point to the new tessellation state
-        pipelineInfo.pTessellationState = &tessellationState;
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
         pipelineInfo.pMultisampleState = &multisampling;
@@ -865,13 +865,10 @@ private:
         }
 
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
-        vkDestroyShaderModule(device, teseShaderModule, nullptr);
-        vkDestroyShaderModule(device, tescShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
     }
 
-    void createFramebuffers()
-    {
+    void createFramebuffers() {
         swapChainFramebuffers.resize(swapChainImageViews.size());
 
         for (size_t i = 0; i < swapChainImageViews.size(); i++) {
@@ -896,7 +893,6 @@ private:
     }
 
     void createCommandPool() {
-
         QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
 
         VkCommandPoolCreateInfo poolInfo{};
@@ -911,12 +907,12 @@ private:
 
     void createDepthResources() {
         VkFormat depthFormat = findDepthFormat();
+
         createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
         depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
-
         for (VkFormat format : candidates) {
             VkFormatProperties props;
             vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
@@ -946,20 +942,12 @@ private:
 
     void createTextureImage() {
         int texWidth, texHeight, texChannels;
-
-        // Load the 16bit image as single-channel (grayscale)
-        stbi_us* pixels = stbi_load_16(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_grey);
-
-        // load the 8-bit image as single-channel (grayscale)
-        // stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_grey);
+        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
-            throw std::runtime_error("failed to load 16-bit texture image!");
+            throw std::runtime_error("failed to load texture image!");
         }
-
-        // Calculate image size for a single channel
-        VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_us); // For 16-bit single-channel
-        // VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_uc); // For 8-bit single-channel
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -972,34 +960,18 @@ private:
 
         stbi_image_free(pixels);
 
-        // a single-channel 16-bit Vulkan format 
-        // VK_FORMAT_R16G16B16A16_UNORM is replaced with VK_FORMAT_R16_UNORM.
-        // 'R16' means one Red channel with 16 bits.
-        createImage(texWidth, texHeight, VK_FORMAT_R16_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
-        // 8bit single-channel format
-        // createImage(texWidth, texHeight, VK_FORMAT_R8_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
 
-        transitionImageLayout(textureImage, VK_FORMAT_R16_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        // For 8-bit single-channel, use VK_FORMAT_R8_UNORM
-        // transitionImageLayout(textureImage, VK_FORMAT_R8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        // for 8-bit single-channel, use VK_FORMAT_R8_UNORM
-        // copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        transitionImageLayout(textureImage, VK_FORMAT_R16_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        // for 8-bit single-channel, use VK_FORMAT_R8_UNORM
-        // transitionImageLayout(textureImage, VK_FORMAT_R8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    void createTextureImageView()
-    {
-        // 16-bit single-channel format
-        textureImageView = createImageView(textureImage, VK_FORMAT_R16_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
-
-        // 8-bit single-channel format
-        // textureImageView = createImageView(textureImage, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+    void createTextureImageView() {
+        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     void createTextureSampler() {
@@ -1027,7 +999,6 @@ private:
     }
 
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
-
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
@@ -1048,7 +1019,6 @@ private:
     }
 
     void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
-
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1084,7 +1054,6 @@ private:
     }
 
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
         VkImageMemoryBarrier barrier{};
@@ -1134,7 +1103,6 @@ private:
     }
 
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
         VkBufferImageCopy region{};
@@ -1157,108 +1125,98 @@ private:
         endSingleTimeCommands(commandBuffer);
     }
 
-    void loadModel()
-    {
-        const float halfX = 2100.0f;
-        const float halfY = 13965.0f;
+    void loadModel() {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
 
-        const int grid = 128; // Number of patches in each direction
-        const int gridY = 128 * 7; // Number of patches in each direction
-
-        std::vector<Vertex> vertexList;
-
-        for (int y = 0; y <= gridY; ++y) {
-            for (int x = 0; x <= grid; ++x) {
-                float u = static_cast<float>(x) / grid;
-                float v = static_cast<float>(y) / gridY;
-
-                float posX = -halfX + u * 2.0f * halfX;
-                float posY = -halfY + v * 2.0f * halfY;
-
-                vertexList.push_back({
-                    { posX, posY, 0.0f },
-                    { 1.0f, 1.0f, 1.0f },
-                    { 0.0f, 0.0f, 1.0f },
-                    { u, v }
-                    });
-            }
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
+            throw std::runtime_error(warn + err);
         }
 
-        vertices.clear();
-        for (int y = 0; y < gridY; ++y) {
-            for (int x = 0; x < grid; ++x) {
-                int i0 = (y) * (grid + 1) + (x);
-                int i1 = (y) * (grid + 1) + (x + 1);
-                int i2 = (y + 1) * (grid + 1) + (x);
-                int i3 = (y + 1) * (grid + 1) + (x + 1);
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
-                vertices.push_back(vertexList[i2]); // top-left
-                vertices.push_back(vertexList[i3]); // top-right
-                vertices.push_back(vertexList[i0]); // bottom-left
-                vertices.push_back(vertexList[i1]); // bottom-right
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                Vertex vertex{};
+
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+
+                /*   vertex.texCoord = {
+                       attrib.texcoords[2 * index.texcoord_index + 0],
+                       1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                   };*/
+
+                vertex.color = { 1.0f, 1.0f, 1.0f };
+
+                vertex.normal = {
+                    attrib.normals[3 * index.normal_index + 0],
+                    attrib.normals[3 * index.normal_index + 1],
+                    attrib.normals[3 * index.normal_index + 2]
+                };
+
+                if (uniqueVertices.count(vertex) == 0) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(uniqueVertices[vertex]);
             }
+        }
+        if (!vertices.empty()) {
+            BoundingBox modelBBox = calculateBoundingBox(vertices);
+
+            std::cout << "--- Model Bounding Box ---" << std::endl;
+            std::cout << "Min Coords: " << glm::to_string(modelBBox.min) << std::endl;
+            std::cout << "Max Coords: " << glm::to_string(modelBBox.max) << std::endl;
+            std::cout << "--------------------------" << std::endl;
+        }
+        else {
+            std::cerr << "Warning: Model loaded but no vertices found to analyse." << std::endl;
         }
     }
 
-    //void loadModel()
-    //{
-    //    tinyobj::attrib_t attrib;
-    //    std::vector<tinyobj::shape_t> shapes;
-    //    std::vector<tinyobj::material_t> materials;
-    //    std::string warn, err;
-
-    //    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
-    //        throw std::runtime_error(warn + err);
-    //    }
-
-    //    // Load vertices without an index buffer ---
-    //    vertices.clear();
-    //    for (const auto& shape : shapes) {
-    //        for (const auto& index : shape.mesh.indices) {
-    //            Vertex vertex{};
-    //            vertex.pos = {
-    //                attrib.vertices[3 * index.vertex_index + 0],
-    //                attrib.vertices[3 * index.vertex_index + 1],
-    //                attrib.vertices[3 * index.vertex_index + 2]
-    //            };
-    //            vertex.normal = {
-    //                attrib.normals[3 * index.normal_index + 0],
-    //                attrib.normals[3 * index.normal_index + 1],
-    //                attrib.normals[3 * index.normal_index + 2]
-    //            };
-    //            vertex.texCoord = {
-    //                attrib.texcoords[2 * index.texcoord_index + 0],
-    //                1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-    //            };
-    //            vertex.color = { 1.0f, 1.0f, 1.0f };
-    //            vertices.push_back(vertex);
-    //        }
-    //    }
-
-    //    if (!vertices.empty()) {
-    //        modelBbox = calculateBoundingBox(vertices);
-
-    //        std::cout << "--- Model Bounding Box ---" << std::endl;
-    //        std::cout << "Min Coords: " << glm::to_string(modelBbox.min) << std::endl;
-    //        std::cout << "Max Coords: " << glm::to_string(modelBbox.max) << std::endl;
-    //        std::cout << "--------------------------" << std::endl;
-    //    }
-    //    else {
-    //        std::cerr << "Warning: Model loaded but no vertices found to analyse." << std::endl;
-    //    }
-    //}
-
     void createVertexBuffer() {
         VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
         createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
         memcpy(data, vertices.data(), (size_t)bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
+
         createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+
         copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void createIndexBuffer() {
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, indices.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+
+        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
@@ -1314,12 +1272,13 @@ private:
             bufferInfo.offset = 0;
             bufferInfo.range = sizeof(UniformBufferObject);
 
-            VkDescriptorImageInfo imageInfo{};
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = textureImageView;
-            imageInfo.sampler = textureSampler;
+            /*   VkDescriptorImageInfo imageInfo{};
+               imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+               imageInfo.imageView = textureImageView;
+               imageInfo.sampler = textureSampler;*/
 
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+               //std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+            std::array<VkWriteDescriptorSet, 1> descriptorWrites{};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = descriptorSets[i];
@@ -1329,20 +1288,19 @@ private:
             descriptorWrites[0].descriptorCount = 1;
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
-            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstSet = descriptorSets[i];
-            descriptorWrites[1].dstBinding = 1;
-            descriptorWrites[1].dstArrayElement = 0;
-            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[1].descriptorCount = 1;
-            descriptorWrites[1].pImageInfo = &imageInfo;
+            /*  descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrites[1].dstSet = descriptorSets[i];
+              descriptorWrites[1].dstBinding = 1;
+              descriptorWrites[1].dstArrayElement = 0;
+              descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+              descriptorWrites[1].descriptorCount = 1;
+              descriptorWrites[1].pImageInfo = &imageInfo;*/
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
         }
     }
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
-
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = size;
@@ -1369,7 +1327,6 @@ private:
     }
 
     VkCommandBuffer beginSingleTimeCommands() {
-
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1389,7 +1346,6 @@ private:
     }
 
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
-
         vkEndCommandBuffer(commandBuffer);
 
         VkSubmitInfo submitInfo{};
@@ -1404,7 +1360,6 @@ private:
     }
 
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
         VkBufferCopy copyRegion{};
@@ -1415,7 +1370,6 @@ private:
     }
 
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-
         VkPhysicalDeviceMemoryProperties memProperties;
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -1430,11 +1384,13 @@ private:
 
     void createCommandBuffers() {
         commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
+
         if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate command buffers!");
         }
@@ -1451,12 +1407,17 @@ private:
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+    {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
+
+        vkCmdResetQueryPool(commandBuffer, queryPool, currentFrame * 2, 2);
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, currentFrame * 2);
 
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1464,47 +1425,92 @@ private:
         renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
         renderPassInfo.renderArea.offset = { 0, 0 };
         renderPassInfo.renderArea.extent = swapChainExtent;
+
         std::array<VkClearValue, 2> clearValues{};
         clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
         clearValues[1].depthStencil = { 1.0f, 0 };
+
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
         renderPassInfo.pClearValues = clearValues.data();
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        // Bind pipeline and buffers once for both eyes
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = (float)swapChainExtent.width;
-        viewport.height = (float)swapChainExtent.height;
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-        VkRect2D scissor{};
-        scissor.offset = { 0, 0 };
-        scissor.extent = swapChainExtent;
-        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
         VkBuffer vertexBuffers[] = { vertexBuffer };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        // Use vkCmdDraw instead of vkCmdDrawIndexed 
-        //vkCmdDraw(commandBuffer, 4, 1, 0, 0); // for tessellation we draw 4 vertices directly
-        vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        // --- RENDER LEFT EYE ---
+        {
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
+            viewport.height = (float)swapChainExtent.height;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = { 0, 0 };
+            scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+            // Push the view index for the left eye (0)
+            int viewIndex = 0;
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(int),
+                &viewIndex);
+
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        }
+
+        // --- RENDER RIGHT EYE ---
+        {
+            VkViewport viewport{};
+            viewport.x = (float)swapChainExtent.width / 2.0f; // Start at the middle
+            viewport.y = 0.0f;
+            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
+            viewport.height = (float)swapChainExtent.height;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = { (int32_t)(swapChainExtent.width / 2) + 50, 0 };
+            scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+            // Push the view index for the right eye (1)
+            int viewIndex = 1;
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(int),
+                &viewIndex);
+
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        }
 
         vkCmdEndRenderPass(commandBuffer);
+
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currentFrame * 2 + 1);
+
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
         }
     }
 
     void createSyncObjects() {
-
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1525,42 +1531,6 @@ private:
         }
     }
 
-    //void updateUniformBuffer(uint32_t currentImage)
-    //{
-    //    // State A: Perspective View (now dynamic based on yaw for rotation)
-    //    glm::vec3 pos_perspective;
-    //    float perspective_radius = 25000.0f; // The distance from the center for the side view
-    //    pos_perspective.x = cameraTarget.x + perspective_radius * sin(glm::radians(yaw));
-    //    pos_perspective.y = cameraTarget.y + perspective_radius * cos(glm::radians(yaw));
-    //    pos_perspective.z = cameraTarget.z +5000.0f; // Keep a fixed elevation for the side view
-    //    glm::vec3 up_perspective = glm::vec3(0.0f, 0.0f, 1.0f); // Z is up
-
-    //    // State B: Top-Down View
-    //    glm::vec3 pos_top_down = cameraTarget + glm::vec3(0.0f, 0.0f, cameraDistance);
-    //    glm::vec3 up_top_down = glm::vec3(0.0f, -1.0f, 0.0f);
-
-    //    // Interpolate camera position and up vector based on the transitionFactor
-    //    this->cameraPos = glm::lerp(pos_perspective, pos_top_down, transitionFactor);
-    //    this->cameraUp = glm::normalize(glm::lerp(up_perspective, up_top_down, transitionFactor));
-
-    //    UniformBufferObject ubo{};
-    //    ubo.model = glm::mat4(1.0f);
-
-    //    // The view matrix is now calculated using the interpolated values
-    //    ubo.view = glm::lookAt(this->cameraPos, this->cameraTarget, this->cameraUp);
-
-    //    // Projection matrix setup
-    //    float aspect = swapChainExtent.width / (float)swapChainExtent.height;
-    //    ubo.proj = glm::perspective(glm::radians(30.0f), aspect, 0.1f, 60000.0f);
-    //    ubo.proj[1][1] *= -1; // Vulkan's Y-coordinate is inverted
-
-    //    // Pass camera world position to the shader
-    //    ubo.cameraPosition = glm::vec4(this->cameraPos, 1.0f);
-
-    //    // Copy the data to the uniform buffer
-    //    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-    //}
-
     void updateUniformBuffer(uint32_t currentImage)
     {
         static auto lastTime = std::chrono::high_resolution_clock::now();
@@ -1573,7 +1543,7 @@ private:
 
         UniformBufferObject ubo{};
         //const float cameraSpeed = 0.0f;
-       const float cameraSpeed = 1000.0f;
+        const float cameraSpeed = 1000.0f;
 
         if (movingForward && cameraPosition.y > 11500.0f) {
             movingForward = false;
@@ -1596,30 +1566,50 @@ private:
         }
 
         glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
+        //glm::vec3 forwardDirection = glm::vec3(0.0f, 1.0f, 0.0f);
         cameraPosition += forwardDirection * cameraSpeed * deltaTime;
-        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f - cameraPosition.y * 0.006f); 
+        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); // No lateral movement
 
-        //std::cout << "z coord " << (cameraPosition.z) << std::endl;
-
-        glm::vec3 cameraTarget = cameraPosition + glm::vec3(0.0f, 1.0f, 0.0f);
-        //glm::vec3 cameraTarget = cameraPosition + forwardDirection;
+        glm::vec3 cameraTarget = cameraPosition + forwardDirection;
         glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
-
         ubo.model = glm::mat4(1.0f);
 
-        ubo.view = glm::lookAt(cameraPosition, cameraTarget, upVector);
+        // stereo parameters
+        float ipd = 0.064f * 1.0f; // Interpupillary distance, sometimes deliberately exaggerated
+        float centre = ipd * 0.5f;
 
         constexpr float fov = glm::radians(30.0f);
-        float aspect = swapChainExtent.width / (float)swapChainExtent.height;
+        float aspect = swapChainExtent.width * 0.5f / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
         float farPlane = 4000.0f; // Increased from 1000.0f
-        ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
+        glm::vec3 rightDir = glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f)));
+        //glm::vec3 rightDir = movingForward ? glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f))) : glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, -1.0f)));
 
-        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
-        ubo.proj[1][1] *= -1;
+        // frustum parameters
+        float top = nearPlane * tan(fov / 2.0f);
+        float bottom = -top;
+        float right = top * aspect;
+        float left = -right;
+        float frustumShift = centre * nearPlane / glm::length(forwardDirection);
 
-        // Pass the camera's world position to the shader (useful for lighting calculations).
-        ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
+        // left eye position
+        glm::vec3 leftEyePosition = cameraPosition - rightDir * centre;
+        glm::vec3 leftViewDir = movingForward ? glm::normalize(cameraTarget - leftEyePosition) : glm::normalize(leftEyePosition - cameraTarget); // LO vector
+        //glm::vec3 leftViewDir = glm::normalize(leftEyePosition - cameraTarget); // LO vector
+        ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + leftViewDir, upVector);
+        //ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + forwardDirection, upVector);
+        ubo.proj[0] = glm::frustum(left - frustumShift, right - frustumShift, bottom, top, nearPlane, farPlane);
+        ubo.proj[0][1][1] *= -1;
+        ubo.cameraPosition[0] = glm::vec4(leftEyePosition, 1.0f);
+
+        // right eye position
+        glm::vec3 rightEyePosition = cameraPosition + rightDir * centre;
+        glm::vec3 rightViewDir = movingForward ? glm::normalize(cameraTarget - rightEyePosition): glm::normalize(rightEyePosition - cameraTarget); // RO vector
+        ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + rightViewDir, upVector);
+        //ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + forwardDirection, upVector);
+        ubo.proj[1] = glm::frustum(left + frustumShift, right + frustumShift, bottom, top, nearPlane, farPlane);
+        ubo.proj[1][1][1] *= -1;
+        ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
 
         // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
@@ -1627,8 +1617,10 @@ private:
 
     void drawFrame() {
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+
         uint32_t imageIndex;
         VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             recreateSwapChain();
             return;
@@ -1636,34 +1628,46 @@ private:
         else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
+
         updateUniformBuffer(currentFrame);
+
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+
         recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
         VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
         VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
+
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
+
         VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
+
         if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
+
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
         presentInfo.pWaitSemaphores = signalSemaphores;
+
         VkSwapchainKHR swapChains[] = { swapChain };
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = swapChains;
         presentInfo.pImageIndices = &imageIndex;
+
         result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
@@ -1671,11 +1675,11 @@ private:
         else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");
         }
+
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     VkShaderModule createShaderModule(const std::vector<char>& code) {
-
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         createInfo.codeSize = code.size();
@@ -1690,7 +1694,6 @@ private:
     }
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-
         for (const auto& availableFormat : availableFormats) {
             if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 return availableFormat;
@@ -1711,7 +1714,6 @@ private:
     }
 
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
-
         if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
             return capabilities.currentExtent;
         }
@@ -1732,7 +1734,6 @@ private:
     }
 
     SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
-
         SwapChainSupportDetails details;
 
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
@@ -1758,22 +1759,24 @@ private:
 
     bool isDeviceSuitable(VkPhysicalDevice device) {
         QueueFamilyIndices indices = findQueueFamilies(device);
+
         bool extensionsSupported = checkDeviceExtensionSupport(device);
+
         bool swapChainAdequate = false;
         if (extensionsSupported) {
             SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
+
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-        // Check for tessellation shader support ---
-        return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.tessellationShader && supportedFeatures.fillModeNonSolid;
-
+        // Ensure the device supports wireframe rendering (non-solid fill mode).
+        //return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.fillModeNonSolid;
+        return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
     }
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
-
         uint32_t extensionCount;
         vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
@@ -1790,7 +1793,6 @@ private:
     }
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
-
         QueueFamilyIndices indices;
 
         uint32_t queueFamilyCount = 0;
@@ -1823,7 +1825,6 @@ private:
     }
 
     std::vector<const char*> getRequiredExtensions() {
-
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions;
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
@@ -1838,7 +1839,6 @@ private:
     }
 
     bool checkValidationLayerSupport() {
-
         uint32_t layerCount;
         vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 
@@ -1923,73 +1923,6 @@ private:
                 dataFile.close();
                 std::cout << ">> GPU execution times saved to " << filename << "\n";
             }
-        }
-    }
-
-    void processKeyboardInput()
-    {
-        // Adjust this value to change how fast the camera pans up and down
-        const float cameraPanSpeed = 10.0f;
-
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-            cameraTarget.y -= cameraPanSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-            cameraTarget.y += cameraPanSpeed;
-        }
-    }
-
-    static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-        auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(window));
-        if (button == GLFW_MOUSE_BUTTON_LEFT) {
-            if (action == GLFW_PRESS) {
-                app->isInteracting = true;
-                // Capture both X and Y cursor positions
-                glfwGetCursorPos(window, &app->lastX, &app->lastY);
-            }
-            else if (action == GLFW_RELEASE) {
-                app->isInteracting = false;
-            }
-        }
-    }
-
-    static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
-        auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(window));
-        if (!app->isInteracting) {
-            return;
-        }
-
-        // Calculate horizontal and vertical mouse movement since last frame
-        float xoffset = static_cast<float>(xpos - app->lastX);
-        float yoffset = static_cast<float>(ypos - app->lastY);
-        app->lastX = xpos;
-        app->lastY = ypos;
-
-        // Horizontal movement (left/right) controls yaw rotation
-        float rotationSensitivity = 0.15f;
-        app->yaw += xoffset * rotationSensitivity;
-
-        // Vertical movement (up/down) controls transition to top-down view
-        float transitionSensitivity = 0.005f;
-        app->transitionFactor += yoffset * transitionSensitivity;
-
-        // Clamp the transition factor between 0.0 and 1.0
-        app->transitionFactor = std::clamp(app->transitionFactor, 0.0f, 1.0f);
-    }
-
-    static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-        auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(window));
-
-        // Zoom in/out by changing the distance
-        float zoomSpeed = 1500.0f;
-        app->cameraDistance -= static_cast<float>(yoffset) * zoomSpeed;
-
-        // Constrain zoom distance
-        if (app->cameraDistance < 100.0f) {
-            app->cameraDistance = 100.0f;
-        }
-        if (app->cameraDistance > 50000.0f) {
-            app->cameraDistance = 50000.0f;
         }
     }
 

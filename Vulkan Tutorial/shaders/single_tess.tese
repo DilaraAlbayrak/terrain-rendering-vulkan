@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_multiview : require
 
 layout(quads) in;
 
@@ -9,13 +10,12 @@ layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec3 fragPosition;
 layout(location = 2) out vec3 fragViewDir;
 
-layout(binding = 0) uniform UniformBufferObject {
+layout(std140, binding = 0) uniform UniformBufferObject {
     mat4 model;
-    mat4 view;
-    mat4 proj;
-    vec4 cameraPosition;
-    float minZ;
-    float maxZ;
+    mat4 view[2];
+    mat4 proj[2];
+    vec4 cameraPosition[2];
+    vec4 minMaxZ;
 } ubo;
 
 layout(binding = 1) uniform sampler2D heightMap;
@@ -28,9 +28,8 @@ vec3 calculateTangentSpaceNormal(vec2 texCoord)
     float hD = texture(heightMap, texCoord - vec2(0, offset.y)).r;
     float hU = texture(heightMap, texCoord + vec2(0, offset.y)).r;
     
-    float scale = ubo.maxZ - ubo.minZ;
+    float scale = ubo.minMaxZ.y - ubo.minMaxZ.x;
     
-    //vec3 N = vec3(scale * (hL - hR), scale * (hD - hU), 2.0 * offset.x);
     vec3 N = vec3(scale * (hL - hR), scale * (hD - hU), 2.0);
     return normalize(N);
 }
@@ -43,15 +42,17 @@ void main()
     vec3 basePos = mix(mix(inPosition_TES[0], inPosition_TES[1], u), mix(inPosition_TES[2], inPosition_TES[3], u), v);
 
     float heightSample = texture(heightMap, texCoord).r;
-    basePos.z += mix(ubo.minZ, ubo.maxZ, heightSample);
+    basePos.z += mix(ubo.minMaxZ.x, ubo.minMaxZ.y, heightSample);
 
     vec3 worldPos = vec3(ubo.model * vec4(basePos, 1.0));
     fragPosition = worldPos;
 
-    fragViewDir = normalize(ubo.cameraPosition.xyz - worldPos);
+    // Use gl_ViewIndex instead of pushConstants.viewIndex
+    fragViewDir = normalize(ubo.cameraPosition[gl_ViewIndex].xyz - worldPos);
 
     vec3 tangentNormal = calculateTangentSpaceNormal(texCoord);
     fragNormal = normalize(mat3(transpose(inverse(ubo.model))) * tangentNormal);
     
-    gl_Position = ubo.proj * ubo.view * vec4(worldPos, 1.0);
+    // Use gl_ViewIndex instead of pushConstants.viewIndex
+    gl_Position = ubo.proj[gl_ViewIndex] * ubo.view[gl_ViewIndex] * ubo.model * vec4(basePos, 1.0);
 }

@@ -36,8 +36,8 @@
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-const uint32_t WIDTH = 1200;
-const uint32_t HEIGHT = 900;
+const uint32_t WIDTH = 1800 + 50; // +50 for the gap between stereo view
+const uint32_t HEIGHT = 1000;
 
 const std::string MODEL_PATH = "models/apollo11-2500.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";
@@ -115,14 +115,14 @@ struct Vertex {
         return bindingDescription;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions{};
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
         attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
-        attributeDescriptions[1].binding = 0;
+       /* attributeDescriptions[1].binding = 0;
         attributeDescriptions[1].location = 1;
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
@@ -130,12 +130,12 @@ struct Vertex {
         attributeDescriptions[2].binding = 0;
         attributeDescriptions[2].location = 2;
         attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, normal);
+        attributeDescriptions[2].offset = offsetof(Vertex, normal);*/
 
-        attributeDescriptions[3].binding = 0;
-        attributeDescriptions[3].location = 3;
-        attributeDescriptions[3].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[3].offset = offsetof(Vertex, texCoord);
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 3;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(Vertex, texCoord);
 
         return attributeDescriptions;
     }
@@ -169,11 +169,10 @@ namespace std {
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model = glm::mat4(1.0f);
-    alignas(16) glm::mat4 view;
-    alignas(16) glm::mat4 proj;
-    alignas(16) glm::vec4 cameraPosition;
-    alignas(4) float minZ = -196.42f;
-    alignas(4) float maxZ = 196.42;
+    alignas(16) glm::mat4 view[2];
+    alignas(16) glm::mat4 proj[2];
+    alignas(16) glm::vec4 cameraPosition[2];
+	alignas(16) glm::vec4 minMaxZ = glm::vec4(-196.42f, 196.42f, 0.0f, 0.0f);
 };
 
 class TerrainRenderer {
@@ -227,11 +226,11 @@ private:
     VkSampler textureSampler;
 
     std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
-    // std::vector<uint32_t> indices;
-    // VkBuffer indexBuffer;
-    // VkDeviceMemory indexBufferMemory;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
@@ -319,6 +318,7 @@ private:
         createTextureSampler();
         loadModel(); // Load low-poly control mesh
         createVertexBuffer();
+        //createIndexBuffer();
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
@@ -412,8 +412,8 @@ private:
         vkDestroyImage(device, textureImage, nullptr);
         vkFreeMemory(device, textureImageMemory, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        // vkDestroyBuffer(device, indexBuffer, nullptr);
-        // vkFreeMemory(device, indexBufferMemory, nullptr);
+        vkDestroyBuffer(device, indexBuffer, nullptr);
+        vkFreeMemory(device, indexBufferMemory, nullptr);
         vkDestroyBuffer(device, vertexBuffer, nullptr);
         vkFreeMemory(device, vertexBufferMemory, nullptr);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -535,8 +535,10 @@ private:
 
     void createLogicalDevice() {
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
         float queuePriority = 1.0f;
         for (uint32_t queueFamily : uniqueQueueFamilies) {
             VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -547,35 +549,31 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        // Enable tessellation shader feature
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
-        //deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
-        deviceFeatures.tessellationShader = VK_TRUE; // Enable tessellation
+		deviceFeatures.tessellationShader = VK_TRUE; // Enable tessellation shaders
+        deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
+
         createInfo.pEnabledFeatures = &deviceFeatures;
+
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
-        if (enableValidationLayers) {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
-        }
-        else {
-            createInfo.enabledLayerCount = 0;
-        }
+
         if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
             throw std::runtime_error("failed to create logical device!");
         }
+
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
     }
 
-    void createSwapChain()
-    {
+    void createSwapChain() {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
 
         VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
@@ -627,16 +625,15 @@ private:
         swapChainExtent = extent;
     }
 
-    void createImageViews()
-    {
+    void createImageViews() {
         swapChainImageViews.resize(swapChainImages.size());
+
         for (uint32_t i = 0; i < swapChainImages.size(); i++) {
             swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
         }
     }
 
-    void createRenderPass()
-    {
+    void createRenderPass() {
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = swapChainImageFormat;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -701,8 +698,8 @@ private:
         uboLayoutBinding.descriptorCount = 1;
         uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         uboLayoutBinding.pImmutableSamplers = nullptr;
-        // The UBO is needed in the TCS and TES. This is correct.
-        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+        // The UBO is needed in the TCS and TES. 
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
 
         VkDescriptorSetLayoutBinding samplerLayoutBinding{};
         samplerLayoutBinding.binding = 1;
@@ -711,7 +708,7 @@ private:
         samplerLayoutBinding.pImmutableSamplers = nullptr;
         // CRITICAL CHANGE: The sampler is needed in the TES (for displacement)
         // AND now also in the Fragment Shader (for normal calculation).
-        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; // <--- UPDATE THIS LINE
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT; // | VK_SHADER_STAGE_FRAGMENT_BIT;
 
         std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -726,10 +723,10 @@ private:
 
     void createGraphicsPipeline() {
         // Load all four shader stages ---
-        auto vertShaderCode = readFile("shaders/tess.vert.spv");
-        auto fragShaderCode = readFile("shaders/tess.frag.spv");
-        auto tescShaderCode = readFile("shaders/tess.tesc.spv");
-        auto teseShaderCode = readFile("shaders/tess.tese.spv");
+        auto vertShaderCode = readFile("shaders/multi_tess.vert.spv");
+        auto fragShaderCode = readFile("shaders/multi_tess.frag.spv");
+        auto tescShaderCode = readFile("shaders/multi_tess.tesc.spv");
+        auto teseShaderCode = readFile("shaders/multi_tess.tese.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -762,7 +759,6 @@ private:
 
         std::array<VkPipelineShaderStageCreateInfo, 4> shaderStages = { vertShaderStageInfo, tescShaderStageInfo, teseShaderStageInfo, fragShaderStageInfo };
 
-
         auto bindingDescription = Vertex::getBindingDescription();
         auto attributeDescriptions = Vertex::getAttributeDescriptions();
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
@@ -793,7 +789,7 @@ private:
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Keep wireframe to see tessellation
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -833,10 +829,19 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        // Define the push constant range (for multipass)
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(int); // We are pushing a single integer (viewIndex)
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+        pipelineLayoutInfo.pushConstantRangeCount = 1; // Specify we are using one push constant range
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange; // Point to our range
+
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
         }
@@ -870,8 +875,7 @@ private:
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
     }
 
-    void createFramebuffers()
-    {
+    void createFramebuffers() {
         swapChainFramebuffers.resize(swapChainImageViews.size());
 
         for (size_t i = 0; i < swapChainImageViews.size(); i++) {
@@ -911,6 +915,7 @@ private:
 
     void createDepthResources() {
         VkFormat depthFormat = findDepthFormat();
+
         createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
         depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
@@ -1277,6 +1282,26 @@ private:
         }
     }
 
+    void createIndexBuffer() {
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, indices.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+
+        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
     void createDescriptorPool() {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1451,12 +1476,17 @@ private:
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
+    {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
+
+        vkCmdResetQueryPool(commandBuffer, queryPool, currentFrame * 2, 2);
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, currentFrame * 2);
 
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1464,40 +1494,88 @@ private:
         renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
         renderPassInfo.renderArea.offset = { 0, 0 };
         renderPassInfo.renderArea.extent = swapChainExtent;
+
         std::array<VkClearValue, 2> clearValues{};
         clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
         clearValues[1].depthStencil = { 1.0f, 0 };
+
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
         renderPassInfo.pClearValues = clearValues.data();
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        // Bind pipeline and buffers once for both eyes
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = (float)swapChainExtent.width;
-        viewport.height = (float)swapChainExtent.height;
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-        VkRect2D scissor{};
-        scissor.offset = { 0, 0 };
-        scissor.extent = swapChainExtent;
-        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
         VkBuffer vertexBuffers[] = { vertexBuffer };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
+        //vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        // Use vkCmdDraw instead of vkCmdDrawIndexed 
-        //vkCmdDraw(commandBuffer, 4, 1, 0, 0); // for tessellation we draw 4 vertices directly
-        vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        // --- RENDER LEFT EYE ---
+        {
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
+            viewport.height = (float)swapChainExtent.height;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = { 0, 0 };
+            scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+            // Push the view index for the left eye (0)
+            int viewIndex = 0;
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                0,
+                sizeof(int),
+                &viewIndex);
+
+            //vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+            vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        }
+
+        // --- RENDER RIGHT EYE ---
+        {
+            VkViewport viewport{};
+            viewport.x = (float)swapChainExtent.width / 2.0f; // Start at the middle
+            viewport.y = 0.0f;
+            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
+            viewport.height = (float)swapChainExtent.height;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = { (int32_t)(swapChainExtent.width / 2) + 50, 0 };
+            scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+            // Push the view index for the right eye (1)
+            int viewIndex = 1;
+            vkCmdPushConstants(
+                commandBuffer,
+                pipelineLayout,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                0,
+                sizeof(int),
+                &viewIndex);
+
+            //vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+            vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+        }
 
         vkCmdEndRenderPass(commandBuffer);
+
+        vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currentFrame * 2 + 1);
+
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
         }
@@ -1525,42 +1603,6 @@ private:
         }
     }
 
-    //void updateUniformBuffer(uint32_t currentImage)
-    //{
-    //    // State A: Perspective View (now dynamic based on yaw for rotation)
-    //    glm::vec3 pos_perspective;
-    //    float perspective_radius = 25000.0f; // The distance from the center for the side view
-    //    pos_perspective.x = cameraTarget.x + perspective_radius * sin(glm::radians(yaw));
-    //    pos_perspective.y = cameraTarget.y + perspective_radius * cos(glm::radians(yaw));
-    //    pos_perspective.z = cameraTarget.z +5000.0f; // Keep a fixed elevation for the side view
-    //    glm::vec3 up_perspective = glm::vec3(0.0f, 0.0f, 1.0f); // Z is up
-
-    //    // State B: Top-Down View
-    //    glm::vec3 pos_top_down = cameraTarget + glm::vec3(0.0f, 0.0f, cameraDistance);
-    //    glm::vec3 up_top_down = glm::vec3(0.0f, -1.0f, 0.0f);
-
-    //    // Interpolate camera position and up vector based on the transitionFactor
-    //    this->cameraPos = glm::lerp(pos_perspective, pos_top_down, transitionFactor);
-    //    this->cameraUp = glm::normalize(glm::lerp(up_perspective, up_top_down, transitionFactor));
-
-    //    UniformBufferObject ubo{};
-    //    ubo.model = glm::mat4(1.0f);
-
-    //    // The view matrix is now calculated using the interpolated values
-    //    ubo.view = glm::lookAt(this->cameraPos, this->cameraTarget, this->cameraUp);
-
-    //    // Projection matrix setup
-    //    float aspect = swapChainExtent.width / (float)swapChainExtent.height;
-    //    ubo.proj = glm::perspective(glm::radians(30.0f), aspect, 0.1f, 60000.0f);
-    //    ubo.proj[1][1] *= -1; // Vulkan's Y-coordinate is inverted
-
-    //    // Pass camera world position to the shader
-    //    ubo.cameraPosition = glm::vec4(this->cameraPos, 1.0f);
-
-    //    // Copy the data to the uniform buffer
-    //    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-    //}
-
     void updateUniformBuffer(uint32_t currentImage)
     {
         static auto lastTime = std::chrono::high_resolution_clock::now();
@@ -1573,7 +1615,7 @@ private:
 
         UniformBufferObject ubo{};
         //const float cameraSpeed = 0.0f;
-       const float cameraSpeed = 1000.0f;
+        const float cameraSpeed = 100.0f;
 
         if (movingForward && cameraPosition.y > 11500.0f) {
             movingForward = false;
@@ -1596,30 +1638,50 @@ private:
         }
 
         glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
+        //glm::vec3 forwardDirection = glm::vec3(0.0f, 1.0f, 0.0f);
         cameraPosition += forwardDirection * cameraSpeed * deltaTime;
-        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f - cameraPosition.y * 0.006f); 
+        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f - cameraPosition.y * 0.006f); // No lateral movement
 
-        //std::cout << "z coord " << (cameraPosition.z) << std::endl;
-
-        glm::vec3 cameraTarget = cameraPosition + glm::vec3(0.0f, 1.0f, 0.0f);
-        //glm::vec3 cameraTarget = cameraPosition + forwardDirection;
+        glm::vec3 cameraTarget = cameraPosition + forwardDirection;
         glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
-
         ubo.model = glm::mat4(1.0f);
 
-        ubo.view = glm::lookAt(cameraPosition, cameraTarget, upVector);
+        // stereo parameters
+        float ipd = 0.064f * 1.0f; // Interpupillary distance, sometimes deliberately exaggerated
+        float centre = ipd * 0.5f;
 
         constexpr float fov = glm::radians(30.0f);
-        float aspect = swapChainExtent.width / (float)swapChainExtent.height;
+        float aspect = swapChainExtent.width * 0.5f / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
         float farPlane = 4000.0f; // Increased from 1000.0f
-        ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
+        glm::vec3 rightDir = glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f)));
+        //glm::vec3 rightDir = movingForward ? glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f))) : glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, -1.0f)));
 
-        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
-        ubo.proj[1][1] *= -1;
+        // frustum parameters
+        float top = nearPlane * tan(fov / 2.0f);
+        float bottom = -top;
+        float right = top * aspect;
+        float left = -right;
+        float frustumShift = centre * nearPlane / glm::length(forwardDirection);
 
-        // Pass the camera's world position to the shader (useful for lighting calculations).
-        ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
+        // left eye position
+        glm::vec3 leftEyePosition = cameraPosition - rightDir * centre;
+        glm::vec3 leftViewDir = movingForward ? glm::normalize(cameraTarget - leftEyePosition) : glm::normalize(leftEyePosition - cameraTarget); // LO vector
+        //glm::vec3 leftViewDir = glm::normalize(leftEyePosition - cameraTarget); // LO vector
+        ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + leftViewDir, upVector);
+        //ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + forwardDirection, upVector);
+        ubo.proj[0] = glm::frustum(left - frustumShift, right - frustumShift, bottom, top, nearPlane, farPlane);
+        ubo.proj[0][1][1] *= -1;
+        ubo.cameraPosition[0] = glm::vec4(leftEyePosition, 1.0f);
+
+        // right eye position
+        glm::vec3 rightEyePosition = cameraPosition + rightDir * centre;
+        glm::vec3 rightViewDir = movingForward ? glm::normalize(cameraTarget - rightEyePosition) : glm::normalize(rightEyePosition - cameraTarget); // RO vector
+        ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + rightViewDir, upVector);
+        //ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + forwardDirection, upVector);
+        ubo.proj[1] = glm::frustum(left + frustumShift, right + frustumShift, bottom, top, nearPlane, farPlane);
+        ubo.proj[1][1][1] *= -1;
+        ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
 
         // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));

@@ -274,7 +274,6 @@ private:
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
-    std::vector<float> frameFpsLog;
     std::vector<float> fpsLog;
     std::vector<double> gpuTimeLog;
     VkQueryPool queryPool;
@@ -332,7 +331,6 @@ private:
         auto lastTime = std::chrono::high_resolution_clock::now();
         auto renderLastTime = std::chrono::high_resolution_clock::now();
         int frames = 0;
-        size_t frameLogStartIndex = 0;
 
         while (!glfwWindowShouldClose(window))
         {
@@ -343,6 +341,7 @@ private:
             );
 
             glfwPollEvents();
+			processKeyboardInput();
             drawFrame();
 
             frames++;
@@ -351,11 +350,7 @@ private:
             auto currentTime = std::chrono::high_resolution_clock::now();
 
             double frameTimeSeconds = std::chrono::duration<double>(currentTime - renderLastTime).count();
-            if (routeCount <= routeLimit)
-            {
-                frameTimeLog.push_back(frameTimeSeconds);
-                frameFpsLog.push_back(0.0f); // placeholder for frame FPS
-            }
+            if (routeCount <= routeLimit) frameTimeLog.push_back(frameTimeSeconds);
             renderLastTime = currentTime;
 
             if (queryResult == VK_SUCCESS && routeCount <= routeLimit) {
@@ -368,13 +363,6 @@ private:
             if (elapsed >= 1.0) {
                 float currentFPS = frames / elapsed;
                 if (routeCount <= routeLimit) fpsLog.push_back(currentFPS);
-
-                for (size_t i = frameLogStartIndex; i < frameFpsLog.size(); i++)
-                {
-                    frameFpsLog[i] = currentFPS;
-                }
-
-                frameLogStartIndex = frameFpsLog.size();
 
                 frames = 0;
                 lastTime = currentTime;
@@ -550,7 +538,7 @@ private:
         // Enable tessellation shader feature
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
-        //deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
+        deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
         deviceFeatures.tessellationShader = VK_TRUE; // Enable tessellation
 
         VkDeviceCreateInfo createInfo{};
@@ -793,7 +781,7 @@ private:
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Keep wireframe to see tessellation
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -1525,103 +1513,102 @@ private:
         }
     }
 
-    //void updateUniformBuffer(uint32_t currentImage)
-    //{
-    //    // State A: Perspective View (now dynamic based on yaw for rotation)
-    //    glm::vec3 pos_perspective;
-    //    float perspective_radius = 25000.0f; // The distance from the center for the side view
-    //    pos_perspective.x = cameraTarget.x + perspective_radius * sin(glm::radians(yaw));
-    //    pos_perspective.y = cameraTarget.y + perspective_radius * cos(glm::radians(yaw));
-    //    pos_perspective.z = cameraTarget.z +5000.0f; // Keep a fixed elevation for the side view
-    //    glm::vec3 up_perspective = glm::vec3(0.0f, 0.0f, 1.0f); // Z is up
+    //  void updateUniformBuffer(uint32_t currentImage)
+    //  {
+    //      static auto lastTime = std::chrono::high_resolution_clock::now();
+    //      auto currentTime = std::chrono::high_resolution_clock::now();
+    //      float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
+    //      lastTime = currentTime;
 
-    //    // State B: Top-Down View
-    //    glm::vec3 pos_top_down = cameraTarget + glm::vec3(0.0f, 0.0f, cameraDistance);
-    //    glm::vec3 up_top_down = glm::vec3(0.0f, -1.0f, 0.0f);
+    //      static glm::vec3 cameraPosition = glm::vec3(0.0f, -14000.0f, 100.0f);
+    //      static bool movingForward = true;
 
-    //    // Interpolate camera position and up vector based on the transitionFactor
-    //    this->cameraPos = glm::lerp(pos_perspective, pos_top_down, transitionFactor);
-    //    this->cameraUp = glm::normalize(glm::lerp(up_perspective, up_top_down, transitionFactor));
+    //      UniformBufferObject ubo{};
+    //      const float cameraSpeed = 100.0f;
 
-    //    UniformBufferObject ubo{};
-    //    ubo.model = glm::mat4(1.0f);
+    //      if (movingForward && cameraPosition.y > 11500.0f) {
+    //          movingForward = false; 
+    //      }
+    //      else if (!movingForward && cameraPosition.y < -14000.0f) {
+    //          movingForward = true; 
+          //	routeCount++;
 
-    //    // The view matrix is now calculated using the interpolated values
-    //    ubo.view = glm::lookAt(this->cameraPos, this->cameraTarget, this->cameraUp);
+          //	if (routeCount > routeLimit) {
+          //		// exit the program
+          //		std::cout << ">>>> Route completed. num frames: " << numFrames << std::endl;
 
-    //    // Projection matrix setup
-    //    float aspect = swapChainExtent.width / (float)swapChainExtent.height;
-    //    ubo.proj = glm::perspective(glm::radians(30.0f), aspect, 0.1f, 60000.0f);
-    //    ubo.proj[1][1] *= -1; // Vulkan's Y-coordinate is inverted
+    //              if (!loggingDone)
+    //              {
+          //			savePerformanceLogsToFile();
+          //			loggingDone = true;
+    //              }
+    //              glfwSetWindowShouldClose(window, true);
+          //	}
+    //      }
 
-    //    // Pass camera world position to the shader
-    //    ubo.cameraPosition = glm::vec4(this->cameraPos, 1.0f);
+    //      glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
+    //      cameraPosition += forwardDirection * cameraSpeed * deltaTime;
+          //cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); // No lateral movement
 
-    //    // Copy the data to the uniform buffer
-    //    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-    //}
+    //      //std::cout << "z coord " << (cameraPosition.z) << std::endl;
+
+    //      glm::vec3 cameraTarget = cameraPosition + glm::vec3(0.0f, 1.0f, 0.0f);
+    //      //glm::vec3 cameraTarget = cameraPosition + forwardDirection;
+    //      glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
+
+    //      ubo.model = glm::mat4(1.0f);
+
+    //      ubo.view = glm::lookAt(cameraPosition, cameraTarget, upVector);
+
+    //      constexpr float fov = glm::radians(30.0f);
+    //      float aspect = swapChainExtent.width / (float)swapChainExtent.height;
+    //      float nearPlane = 0.1f;
+    //      float farPlane = 4000.0f; // Increased from 1000.0f
+    //      ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
+
+    //      // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
+    //      ubo.proj[1][1] *= -1;
+
+    //      // Pass the camera's world position to the shader (useful for lighting calculations).
+    //      ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
+
+    //      // Copy the data to the uniform buffer.
+    //      memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+    //  }
 
     void updateUniformBuffer(uint32_t currentImage)
     {
-        static auto lastTime = std::chrono::high_resolution_clock::now();
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
-        lastTime = currentTime;
+        // State A: Perspective View (now dynamic based on yaw for rotation)
+        glm::vec3 pos_perspective;
+        float perspective_radius = 25000.0f; // The distance from the center for the side view
+        pos_perspective.x = cameraTarget.x + perspective_radius * sin(glm::radians(yaw));
+        pos_perspective.y = cameraTarget.y + perspective_radius * cos(glm::radians(yaw));
+        pos_perspective.z = cameraTarget.z +1000.0f; // Keep a fixed elevation for the side view
+        glm::vec3 up_perspective = glm::vec3(0.0f, 0.0f, 1.0f); // Z is up
 
-        static glm::vec3 cameraPosition = glm::vec3(0.0f, -14000.0f, 100.0f);
-        static bool movingForward = true;
+        // State B: Top-Down View
+        glm::vec3 pos_top_down = cameraTarget + glm::vec3(0.0f, 0.0f, cameraDistance);
+        glm::vec3 up_top_down = glm::vec3(0.0f, -1.0f, 0.0f);
+
+        // Interpolate camera position and up vector based on the transitionFactor
+        this->cameraPos = glm::lerp(pos_perspective, pos_top_down, transitionFactor);
+        this->cameraUp = glm::normalize(glm::lerp(up_perspective, up_top_down, transitionFactor));
 
         UniformBufferObject ubo{};
-        //const float cameraSpeed = 0.0f;
-       const float cameraSpeed = 1000.0f;
-
-        if (movingForward && cameraPosition.y > 11500.0f) {
-            movingForward = false;
-        }
-        else if (!movingForward && cameraPosition.y < -14000.0f) {
-            movingForward = true;
-            routeCount++;
-
-            if (routeCount > routeLimit) {
-                // exit the program
-                std::cout << ">>>> Route completed. num frames: " << numFrames << std::endl;
-
-                if (!loggingDone)
-                {
-                    savePerformanceLogsToFile();
-                    loggingDone = true;
-                }
-                glfwSetWindowShouldClose(window, true);
-            }
-        }
-
-        glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
-        cameraPosition += forwardDirection * cameraSpeed * deltaTime;
-        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f - cameraPosition.y * 0.006f); 
-
-        //std::cout << "z coord " << (cameraPosition.z) << std::endl;
-
-        glm::vec3 cameraTarget = cameraPosition + glm::vec3(0.0f, 1.0f, 0.0f);
-        //glm::vec3 cameraTarget = cameraPosition + forwardDirection;
-        glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
-
         ubo.model = glm::mat4(1.0f);
 
-        ubo.view = glm::lookAt(cameraPosition, cameraTarget, upVector);
+        // The view matrix is now calculated using the interpolated values
+        ubo.view = glm::lookAt(this->cameraPos, this->cameraTarget, this->cameraUp);
 
-        constexpr float fov = glm::radians(30.0f);
+        // Projection matrix setup
         float aspect = swapChainExtent.width / (float)swapChainExtent.height;
-        float nearPlane = 0.1f;
-        float farPlane = 4000.0f; // Increased from 1000.0f
-        ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
+        ubo.proj = glm::perspective(glm::radians(30.0f), aspect, 0.1f, 60000.0f);
+        ubo.proj[1][1] *= -1; // Vulkan's Y-coordinate is inverted
 
-        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
-        ubo.proj[1][1] *= -1;
+        // Pass camera world position to the shader
+        ubo.cameraPosition = glm::vec4(this->cameraPos, 1.0f);
 
-        // Pass the camera's world position to the shader (useful for lighting calculations).
-        ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
-
-        // Copy the data to the uniform buffer.
+        // Copy the data to the uniform buffer
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1863,8 +1850,7 @@ private:
         return true;
     }
 
-    void savePerformanceLogsToFile()
-    {
+    void savePerformanceLogsToFile() {
         std::cout << ">>>> Saving performance logs to file..." << std::endl;
         std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
         std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
@@ -1887,17 +1873,6 @@ private:
                 for (const auto& time : frameTimeLog) { dataFile << time << "\n"; }
                 dataFile.close();
                 std::cout << ">> App-level frame times saved to " << filename << "\n";
-            }
-        }
-
-        if (!frameFpsLog.empty()) {
-            std::string filename = "frame_fps_log_" + timestamp + ".csv";
-            std::ofstream dataFile(filename);
-            if (dataFile.is_open()) {
-                dataFile << "FrameFPS\n";
-                for (const auto& fps : frameFpsLog) { dataFile << fps << "\n"; }
-                dataFile.close();
-                std::cout << ">> Frame-level FPS log saved to " << filename << "\n";
             }
         }
 

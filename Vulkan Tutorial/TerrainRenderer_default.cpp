@@ -182,6 +182,7 @@ public:
     void run()
     {
         frameTimeLog.reserve(150000);
+		frameFpsLog.reserve(150000);
         gpuTimeLog.reserve(150000);
         fpsLog.reserve(500);
 
@@ -260,6 +261,7 @@ private:
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
+    std::vector<float> frameFpsLog;
     std::vector<float> fpsLog;
     std::vector<double> gpuTimeLog;
     VkQueryPool queryPool;
@@ -270,7 +272,7 @@ private:
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Terrain Renderer - Vulkan", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Moon Terrain Vulkan", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
@@ -313,6 +315,7 @@ private:
         auto lastTime = std::chrono::high_resolution_clock::now();
         auto renderLastTime = std::chrono::high_resolution_clock::now();
         int frames = 0;
+		size_t frameLogStartIndex = 0;
 
         while (!glfwWindowShouldClose(window))
         {
@@ -331,7 +334,11 @@ private:
             auto currentTime = std::chrono::high_resolution_clock::now();
 
             double frameTimeSeconds = std::chrono::duration<double>(currentTime - renderLastTime).count();
-            if (routeCount <= routeLimit) frameTimeLog.push_back(frameTimeSeconds);
+            if (routeCount <= routeLimit)
+            {
+                frameTimeLog.push_back(frameTimeSeconds);
+				frameFpsLog.push_back(0.0f); // placeholder for frame FPS
+            }
             renderLastTime = currentTime;
 
             if (queryResult == VK_SUCCESS && routeCount <= routeLimit) {
@@ -344,6 +351,13 @@ private:
             if (elapsed >= 1.0) {
                 float currentFPS = frames / elapsed;
                 if (routeCount <= routeLimit) fpsLog.push_back(currentFPS);
+
+                for (size_t i = frameLogStartIndex; i < frameFpsLog.size(); i++)
+                {
+					frameFpsLog[i] = currentFPS;
+                }
+
+				frameLogStartIndex = frameFpsLog.size();
 
                 frames = 0;
                 lastTime = currentTime;
@@ -542,7 +556,6 @@ private:
 
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
-        deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -708,8 +721,8 @@ private:
     }
 
     void createGraphicsPipeline() {
-        auto vertShaderCode = readFile("shaders/vert.spv");
-        auto fragShaderCode = readFile("shaders/frag.spv");
+        auto vertShaderCode = readFile("shaders/shader.vert.spv");
+        auto fragShaderCode = readFile("shaders/shader.frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -753,8 +766,7 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
-        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -1475,7 +1487,7 @@ private:
         static bool movingForward = true;
 
         UniformBufferObject ubo{};
-        const float cameraSpeed = 100.0f;
+        const float cameraSpeed = 1000.0f;
 
         if (movingForward && cameraPosition.y > 11500.0f) {
             movingForward = false;
@@ -1499,7 +1511,7 @@ private:
 
         glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
         cameraPosition += forwardDirection * cameraSpeed * deltaTime;
-        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); // No lateral movement
+        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); 
 
         //std::cout << "z coord " << (cameraPosition.z) << std::endl;
 
@@ -1683,8 +1695,7 @@ private:
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-        // Ensure the device supports wireframe rendering (non-solid fill mode).
-        return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.fillModeNonSolid;
+        return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
     }
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
@@ -1797,6 +1808,17 @@ private:
                 for (const auto& time : frameTimeLog) { dataFile << time << "\n"; }
                 dataFile.close();
                 std::cout << ">> App-level frame times saved to " << filename << "\n";
+            }
+        }
+
+        if (!frameFpsLog.empty()) {
+            std::string filename = "frame_fps_log_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "FrameFPS\n";
+                for (const auto& fps : frameFpsLog) { dataFile << fps << "\n"; }
+                dataFile.close();
+                std::cout << ">> Frame-level FPS log saved to " << filename << "\n";
             }
         }
 

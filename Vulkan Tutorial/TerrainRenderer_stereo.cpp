@@ -38,7 +38,7 @@
 const uint32_t WIDTH = 1200;
 const uint32_t HEIGHT = 900;
 
-const std::string MODEL_PATH = "models/apollo11-2500.obj";
+const std::string MODEL_PATH = "models/apollo11-49.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";
 const std::string TEXTURE_PATH = "textures/diffuse_map_8k.png"; // not being used
 
@@ -182,6 +182,7 @@ public:
     void run()
     {
         frameTimeLog.reserve(150000);
+        frameFpsLog.reserve(150000);
         gpuTimeLog.reserve(150000);
         fpsLog.reserve(500);
 
@@ -260,6 +261,7 @@ private:
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
+    std::vector<float> frameFpsLog;
     std::vector<float> fpsLog;
     std::vector<double> gpuTimeLog;
     VkQueryPool queryPool;
@@ -313,6 +315,7 @@ private:
         auto lastTime = std::chrono::high_resolution_clock::now();
         auto renderLastTime = std::chrono::high_resolution_clock::now();
         int frames = 0;
+        size_t frameLogStartIndex = 0;
 
         while (!glfwWindowShouldClose(window))
         {
@@ -331,7 +334,11 @@ private:
             auto currentTime = std::chrono::high_resolution_clock::now();
 
             double frameTimeSeconds = std::chrono::duration<double>(currentTime - renderLastTime).count();
-            if (routeCount <= routeLimit) frameTimeLog.push_back(frameTimeSeconds);
+            if (routeCount <= routeLimit)
+            {
+                frameTimeLog.push_back(frameTimeSeconds);
+                frameFpsLog.push_back(0.0f); // placeholder for frame FPS
+            }
             renderLastTime = currentTime;
 
             if (queryResult == VK_SUCCESS && routeCount <= routeLimit) {
@@ -344,6 +351,13 @@ private:
             if (elapsed >= 1.0) {
                 float currentFPS = frames / elapsed;
                 if (routeCount <= routeLimit) fpsLog.push_back(currentFPS);
+
+                for (size_t i = frameLogStartIndex; i < frameFpsLog.size(); i++)
+                {
+                    frameFpsLog[i] = currentFPS;
+                }
+
+                frameLogStartIndex = frameFpsLog.size();
 
                 frames = 0;
                 lastTime = currentTime;
@@ -555,7 +569,7 @@ private:
 		deviceFeatures2.pNext = &multiviewFeatures; // Link the multiview features to the device features chain.
 		vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 		deviceFeatures2.features.samplerAnisotropy = VK_TRUE;
-		deviceFeatures2.features.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
+		//deviceFeatures2.features.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -734,8 +748,8 @@ private:
     }
 
     void createGraphicsPipeline() {
-        auto vertShaderCode = readFile("shaders/stereoV.spv");
-        auto fragShaderCode = readFile("shaders/stereoF.spv");
+        auto vertShaderCode = readFile("shaders/stereo.vert.spv");
+        auto fragShaderCode = readFile("shaders/stereo.frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -780,7 +794,7 @@ private:
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
-        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -1480,7 +1494,7 @@ private:
         static bool movingForward = true;
 
         UniformBufferObject ubo{};
-        const float cameraSpeed = 100.0f;
+        const float cameraSpeed = 1000.0f;
 
         if (movingForward && cameraPosition.y > 11500.0f) {
             movingForward = false;
@@ -1502,41 +1516,49 @@ private:
             }
         }
 
+        //glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
         glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
         cameraPosition += forwardDirection * cameraSpeed * deltaTime;
         cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); // No lateral movement
 
-        //std::cout << "z coord " << (cameraPosition.z) << std::endl;
-
-        glm::vec3 cameraTarget = cameraPosition + glm::vec3(0.0f, 1.0f, 0.0f);
-        //glm::vec3 cameraTarget = cameraPosition + forwardDirection;
+        glm::vec3 cameraTarget = cameraPosition + forwardDirection;
         glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
-
         ubo.model = glm::mat4(1.0f);
 
-		float ipd = 0.064f * 100; // Interpupillary distance, deliberately exaggerated
-		float centre = ipd * 0.5f;
+        // stereo parameters
+        float ipd = 0.064f * 1.0f; // Interpupillary distance, sometimes deliberately exaggerated
+        float centre = ipd * 0.5f;
 
         constexpr float fov = glm::radians(30.0f);
-        float aspect = swapChainExtent.width / (float)swapChainExtent.height;
+        float aspectRatio = swapChainExtent.width / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
         float farPlane = 4000.0f; // Increased from 1000.0f
-        glm::vec3 viewDir = cameraTarget - cameraPosition;
-        glm::vec3 rightDir = glm::normalize(glm::cross(viewDir, glm::vec3(0.0f, 0.0f, 1.0f)));
+        glm::vec3 rightDir = glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f)));
 
-		// left eye position
-		glm::vec3 leftEyePosition = cameraPosition - rightDir * centre;
-        ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + viewDir, glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj[0] = glm::perspective(fov, aspect, nearPlane, farPlane);
+        // frustum parameters
+        float top = nearPlane * tan(fov / 2.0f);
+        float bottom = -top;
+        float right = top * aspectRatio;
+        float left = -right;
+        float frustumShift = centre * nearPlane / glm::length(forwardDirection);
+
+        // left eye position
+        glm::vec3 leftEyePosition = cameraPosition - rightDir * centre;
+        glm::vec3 leftViewDir = glm::normalize(cameraTarget - leftEyePosition); // LO vector
+        //ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + leftViewDir, upVector);
+        ubo.view[0] = glm::lookAt(leftEyePosition, leftEyePosition + forwardDirection, upVector);
+        ubo.proj[0] = glm::frustum(left - frustumShift, right - frustumShift, bottom, top, nearPlane, farPlane);
         ubo.proj[0][1][1] *= -1;
-		ubo.cameraPosition[0] = glm::vec4(leftEyePosition, 1.0f);
+        ubo.cameraPosition[0] = glm::vec4(leftEyePosition, 1.0f);
 
-		// right eye position
-		glm::vec3 rightEyePosition = cameraPosition + rightDir * centre;
-		ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + viewDir, glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj[1] = glm::perspective(fov, aspect, nearPlane, farPlane);
-		ubo.proj[1][1][1] *= -1;
-		ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
+        // right eye position
+        glm::vec3 rightEyePosition = cameraPosition + rightDir * centre;
+        glm::vec3 rightViewDir = glm::normalize(cameraTarget - rightEyePosition); // RO vector
+        //ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + rightViewDir, upVector);
+        ubo.view[1] = glm::lookAt(rightEyePosition, rightEyePosition + forwardDirection, upVector);
+        ubo.proj[1] = glm::frustum(left + frustumShift, right + frustumShift, bottom, top, nearPlane, farPlane);
+        ubo.proj[1][1][1] *= -1;
+        ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
 
         // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
@@ -1812,6 +1834,17 @@ private:
                 for (const auto& time : frameTimeLog) { dataFile << time << "\n"; }
                 dataFile.close();
                 std::cout << ">> App-level frame times saved to " << filename << "\n";
+            }
+        }
+
+        if (!frameFpsLog.empty()) {
+            std::string filename = "frame_fps_log_" + timestamp + ".csv";
+            std::ofstream dataFile(filename);
+            if (dataFile.is_open()) {
+                dataFile << "FrameFPS\n";
+                for (const auto& fps : frameFpsLog) { dataFile << fps << "\n"; }
+                dataFile.close();
+                std::cout << ">> Frame-level FPS log saved to " << filename << "\n";
             }
         }
 

@@ -22,4 +22,5 @@ void main() {
     vec3 finalColour = ambient + diffuse + specular;
 
     outColor = vec4(finalColour, 1.0);
+    //outColor = vec4(1.0, 0.0, 0.0, 1.0);
 }

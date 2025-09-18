@@ -1,27 +1,25 @@
 #version 450
 
+layout(location = 0) in vec3 fragNormal;
+layout(location = 1) in vec3 fragPosition;
+layout(location = 2) in vec3 fragViewDir;
+
 layout(location = 0) out vec4 outColor;
 
-layout(location = 1) in vec2 inTexCoord;
-layout(location = 2) in float inHeight;
+void main() {
+    vec3 normal = normalize(fragNormal);
+    vec3 lightDir = normalize(vec3(0.0, 4.0, 0.0));
+    vec3 viewDir = normalize(fragViewDir);
+    vec3 reflectDir = reflect(-lightDir, normal);
 
-layout(binding = 1) uniform sampler2D heightMap;
+    float diff = max(dot(normal, lightDir), 0.0);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
 
-vec3 calculateNormal()
-{
-    float left  = textureOffset(heightMap, inTexCoord, ivec2(-1, 0)).r;
-    float right = textureOffset(heightMap, inTexCoord, ivec2(1, 0)).r;
-    float down  = textureOffset(heightMap, inTexCoord, ivec2(0, -1)).r;
-    float up    = textureOffset(heightMap, inTexCoord, ivec2(0, 1)).r;
+    vec3 ambient = vec3(0.05);
+    vec3 diffuse = diff * vec3(0.25);
+    vec3 specular = spec * vec3(0.4);
 
-    return normalize(vec3(left - right, down - up, 2.0));
-}
+    vec3 finalColour = ambient + diffuse + specular;
 
-void main()
-{
-    vec3 normal = calculateNormal();
-    vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-    float diffuse = max(dot(normal, lightDir), 0.2);
-    vec3 baseColour = vec3(inHeight);
-    outColor = vec4(baseColour * diffuse, 1.0);
+    outColor = vec4(finalColour, 1.0);
 }
