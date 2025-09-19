@@ -36,8 +36,8 @@
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-const uint32_t WIDTH = 1800 + 50; // +50 for the gap between stereo view
-const uint32_t HEIGHT = 1000;
+const uint32_t WIDTH = 3600 + 50; // +50 for the gap between stereo view
+const uint32_t HEIGHT = 2000;
 
 const std::string MODEL_PATH = "models/apollo11-2500.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";

@@ -18,53 +18,82 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Pseudocode.cpp">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="main.cpp">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="shaders\terrain.frag">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\terrain.tesc">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\terrain.tese">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\terrain.vert">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\shader.frag">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\shader.vert">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\stereo.frag">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="shaders\stereo.vert">
+    <None Include="shaders\multi_tess.frag">
       <Filter>Shaders</Filter>
     </None>
     <None Include="shaders\s.frag">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="shaders\shader.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\single_tess.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\single_tess.tesc">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\terrain.tesc">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\multi_tess.tese">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\single_tess.tese">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\multi_tess.vert">
+      <Filter>Shaders</Filter>
+    </None>
     <None Include="shaders\s.vert">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="shaders\shader.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\single_tess.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="packages.config" />
+    <None Include="$(OpenXRLoaderBinaryRoot)\bin\openxr_loader.dll" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="TerrainRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_default.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_multiview.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="TerrainRenderer_stereo.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="TerrainRenderer_wireframe.cpp">
+    <ClCompile Include="TerrainRenderer_tessellated_stereo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_VR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_stereoVR.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="shaders\tess.vert">
+    <CustomBuild Include="shaders\multi_tess.tesc">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\multiview.frag">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\multiview.vert">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\stereo.frag">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\stereo.vert">
       <Filter>Shaders</Filter>
     </CustomBuild>
     <CustomBuild Include="shaders\tess.frag">
@@ -76,7 +105,7 @@
     <CustomBuild Include="shaders\tess.tese">
       <Filter>Shaders</Filter>
     </CustomBuild>
-    <CustomBuild Include="shaders\s.comp">
+    <CustomBuild Include="shaders\tess.vert">
       <Filter>Shaders</Filter>
     </CustomBuild>
   </ItemGroup>

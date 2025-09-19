@@ -36,8 +36,8 @@
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-const uint32_t WIDTH = 1200;
-const uint32_t HEIGHT = 900;
+const uint32_t WIDTH = 2400;
+const uint32_t HEIGHT = 1800;
 
 const std::string MODEL_PATH = "models/apollo11-2500.obj";
 //const std::string TEXTURE_PATH = "textures/moon_sand_8k.png";
@@ -550,7 +550,7 @@ private:
         // Enable tessellation shader feature
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
-        //deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
+        deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
         deviceFeatures.tessellationShader = VK_TRUE; // Enable tessellation
 
         VkDeviceCreateInfo createInfo{};
@@ -793,7 +793,7 @@ private:
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Keep wireframe to see tessellation
-        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -1573,7 +1573,7 @@ private:
 
         UniformBufferObject ubo{};
         //const float cameraSpeed = 0.0f;
-       const float cameraSpeed = 1000.0f;
+       const float cameraSpeed = 100.0f;
 
         if (movingForward && cameraPosition.y > 11500.0f) {
             movingForward = false;

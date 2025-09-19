@@ -21,9 +21,9 @@ layout(std140, binding = 0) uniform UniformBufferObject {
 } ubo;
 
 const float MIN_DISTANCE = 1.0;
-const float MAX_DISTANCE = 500.0;
+const float MAX_DISTANCE = 600.0;
 const float MIN_TESS_LEVEL = 1.0;
-const float MAX_TESS_LEVEL = 8.0;
+const float MAX_TESS_LEVEL = 16.0;
 
 void main() {
     outPosition[gl_InvocationID] = inPosition[gl_InvocationID];
