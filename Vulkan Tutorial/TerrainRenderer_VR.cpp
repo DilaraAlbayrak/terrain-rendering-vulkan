@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#define VK_API_VERSION_1_2
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -10,7 +11,6 @@
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-// for smooth camera movement, lerp, slerp
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtx/quaternion.hpp>
 
@@ -37,13 +37,14 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <thread>
+#include <sstream>
 
 // openxr headers
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_VULKAN
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-#include <thread>
 
 #define VK_CHECK(result, message) \
     if (result != VK_SUCCESS) { \
@@ -140,13 +141,13 @@ struct UniformBufferObject {
 // openxr structs
 struct XrViewData
 {
-	VkImage image;
-	VkImageView imageView;
+    VkImage image;
+    VkImageView imageView;
 };
 
 struct XrSwapchainData
 {
-    XrSwapchain swapchain;
+    XrSwapchain swapchain = XR_NULL_HANDLE;
     VkFormat format;
     uint32_t width;
     uint32_t height;
@@ -224,22 +225,22 @@ private:
 
     bool framebufferResized = false;
 
-	// openxr variables
-	XrInstance xrInstance = XR_NULL_HANDLE;
-	XrSystemId xrSystemId = XR_NULL_SYSTEM_ID;
-	XrSession xrSession = XR_NULL_HANDLE;
-	XrSpace xrAppSpace = XR_NULL_HANDLE;
-	XrSessionState xrSessionState = XR_SESSION_STATE_IDLE;
-	std::vector<XrSwapchainData> xrSwapchains;
+    // openxr variables
+    XrInstance xrInstance = XR_NULL_HANDLE;
+    XrSystemId xrSystemId = XR_NULL_SYSTEM_ID;
+    XrSession xrSession = XR_NULL_HANDLE;
+    XrSpace xrAppSpace = XR_NULL_HANDLE;
+    XrSessionState xrSessionState = XR_SESSION_STATE_IDLE;
+    std::vector<XrSwapchainData> xrSwapchains;
     int64_t xrColorFormat;
-	std::vector<XrViewConfigurationView> xrViewConfigs; 
-	std::vector<XrView> xrViews; // per-eye view information, including pose and fov
-	std::vector<XrCompositionLayerProjectionView> xrProjectionViews; // per-eye projection layer info
+    std::vector<XrViewConfigurationView> xrViewConfigs;
+    std::vector<XrView> xrViews;
+    std::vector<XrCompositionLayerProjectionView> xrProjectionViews;
 
-	// openxr function pointers, loaded at runtime
-	PFN_xrGetVulkanInstanceExtensionsKHR xrGetVulkanInstanceExtensionsKHR = nullptr;
-	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR = nullptr;
-	PFN_xrGetVulkanGraphicsDeviceKHR xrGetVulkanGraphicsDeviceKHR = nullptr;
+    // openxr function pointers, loaded at runtime
+    PFN_xrGetVulkanInstanceExtensionsKHR xrGetVulkanInstanceExtensionsKHR = nullptr;
+    PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR = nullptr;
+    PFN_xrGetVulkanGraphicsDeviceKHR xrGetVulkanGraphicsDeviceKHR = nullptr;
 
     void initWindow() {
         glfwInit();
@@ -261,30 +262,18 @@ private:
         setupDebugMessenger();
         createSurface();
         pickPhysicalDevice();
-        createLogicalDevice();
+        createLogicalDevice(); // This now creates the XrSession as well
         createCommandPool();
-
-        // Create OpenXR swapchains and their associated resources first
         createXrSwapchains();
-
-        // Create desktop window swapchain for mirror view
-        createSwapChain();
-        createImageViews();
-
-        // The render pass must be compatible with both VR and desktop formats
-        // (This should be handled by your dynamic format selection from the previous step)
-        createRenderPass();
-
-        // --- NEW CALL ORDER ---
-        createXrDepthResources();   // Create VR depth buffer AFTER getting VR swapchain sizes
-        createXrFramebuffers();     // Create VR framebuffers using the new VR depth buffer
-
+        createSwapChain(); // Desktop mirror
+        createImageViews(); // Desktop mirror
+        createRenderPass(); // Unified render pass
+        createXrDepthResources();
+        createXrFramebuffers();
         createDescriptorSetLayout();
         createGraphicsPipeline();
-
-        createDepthResources();     // Create desktop depth buffer for the mirror window
-        createFramebuffers();       // Create framebuffers for the mirror window
-
+        createDepthResources(); // Desktop mirror
+        createFramebuffers(); // Desktop mirror
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
@@ -301,77 +290,90 @@ private:
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
 
-            // Handle OpenXR events
-            XrEventDataBuffer eventData{ XR_TYPE_EVENT_DATA_BUFFER };
-            while (xrPollEvent(xrInstance, &eventData) == XR_SUCCESS) {
-                if (eventData.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
-                    auto sessionStateChanged = *reinterpret_cast<XrEventDataSessionStateChanged*>(&eventData);
-                    xrSessionState = sessionStateChanged.state;
+            bool sessionIsReady = (xrSessionState == XR_SESSION_STATE_READY || xrSessionState == XR_SESSION_STATE_FOCUSED);
 
-                    switch (xrSessionState) {
-                    case XR_SESSION_STATE_READY: {
-                        XrSessionBeginInfo beginInfo{ XR_TYPE_SESSION_BEGIN_INFO };
-                        beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                        xr_check(xrBeginSession(xrSession, &beginInfo), "Failed to begin session");
-                        break;
-                    }
-                    case XR_SESSION_STATE_STOPPING: {
-                        xr_check(xrEndSession(xrSession), "Failed to end session");
-                        break;
-                    }
-                    case XR_SESSION_STATE_EXITING:
-                    case XR_SESSION_STATE_LOSS_PENDING:
-                        glfwSetWindowShouldClose(window, true);
-                        break;
-                    }
+            handleXrEvents();
+
+            if (sessionIsReady) {
+                XrFrameState frameState{ XR_TYPE_FRAME_STATE };
+                xr_check(xrWaitFrame(xrSession, nullptr, &frameState), "Failed to wait for XR frame");
+                xr_check(xrBeginFrame(xrSession, nullptr), "Failed to begin XR frame");
+
+                if (frameState.shouldRender) {
+                    locateXrViews(frameState);
+                    drawXRFrame();
                 }
-                eventData = { XR_TYPE_EVENT_DATA_BUFFER };
-            }
 
-            if (xrSessionState != XR_SESSION_STATE_READY && xrSessionState != XR_SESSION_STATE_FOCUSED) {
+                endXrFrame(frameState);
+
+                // Optional: Render mirror view to desktop window
+                drawFrame();
+            }
+            else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
             }
-
-            // OpenXR Frame Loop
-            XrFrameState frameState{ XR_TYPE_FRAME_STATE };
-            xr_check(xrWaitFrame(xrSession, nullptr, &frameState), "Failed to wait for XR frame");
-
-            xr_check(xrBeginFrame(xrSession, nullptr), "Failed to begin XR frame");
-
-            if (frameState.shouldRender) {
-                // Get headset pose and projection matrices
-                XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
-                viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                viewLocateInfo.displayTime = frameState.predictedDisplayTime;
-                viewLocateInfo.space = xrAppSpace;
-
-                XrViewState viewState{ XR_TYPE_VIEW_STATE };
-                uint32_t viewCount = xrViews.size();
-                xr_check(xrLocateViews(xrSession, &viewLocateInfo, &viewState, viewCount, &viewCount, xrViews.data()), "Failed to locate views");
-
-                drawXRFrame();
-            }
-
-            // Submit frame to OpenXR compositor
-            XrCompositionLayerProjection layer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
-            layer.space = xrAppSpace;
-            layer.viewCount = xrProjectionViews.size();
-            layer.views = xrProjectionViews.data();
-            const XrCompositionLayerBaseHeader* layers[] = { (XrCompositionLayerBaseHeader*)&layer };
-
-            XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
-            endInfo.displayTime = frameState.predictedDisplayTime;
-            endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-            endInfo.layerCount = (xrSessionState == XR_SESSION_STATE_FOCUSED) ? 1 : 0; // Only show layer if focused
-            endInfo.layers = layers;
-
-            xr_check(xrEndFrame(xrSession, &endInfo), "Failed to end XR frame");
-
-            // Optional: Render mirror view to desktop window
-            // drawFrame(); 
         }
         vkDeviceWaitIdle(device);
+    }
+
+    void handleXrEvents() {
+        XrEventDataBuffer eventData{ XR_TYPE_EVENT_DATA_BUFFER };
+        while (xrPollEvent(xrInstance, &eventData) == XR_SUCCESS) {
+            if (eventData.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+                auto sessionStateChanged = *reinterpret_cast<XrEventDataSessionStateChanged*>(&eventData);
+                xrSessionState = sessionStateChanged.state;
+
+                switch (xrSessionState) {
+                case XR_SESSION_STATE_READY: {
+                    XrSessionBeginInfo beginInfo{ XR_TYPE_SESSION_BEGIN_INFO };
+                    beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                    xr_check(xrBeginSession(xrSession, &beginInfo), "Failed to begin session");
+                    break;
+                }
+                case XR_SESSION_STATE_STOPPING: {
+                    xr_check(xrEndSession(xrSession), "Failed to end session");
+                    break;
+                }
+                case XR_SESSION_STATE_EXITING:
+                case XR_SESSION_STATE_LOSS_PENDING:
+                    glfwSetWindowShouldClose(window, true);
+                    break;
+                }
+            }
+            eventData = { XR_TYPE_EVENT_DATA_BUFFER };
+        }
+    }
+
+    void locateXrViews(const XrFrameState& frameState) {
+        XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
+        viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+        viewLocateInfo.displayTime = frameState.predictedDisplayTime;
+        viewLocateInfo.space = xrAppSpace;
+
+        XrViewState viewState{ XR_TYPE_VIEW_STATE };
+        uint32_t viewCount = xrViews.size();
+        xr_check(xrLocateViews(xrSession, &viewLocateInfo, &viewState, viewCount, &viewCount, xrViews.data()), "Failed to locate views");
+    }
+
+    void endXrFrame(const XrFrameState& frameState) {
+        XrCompositionLayerProjection projectionLayer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
+        projectionLayer.space = xrAppSpace;
+        projectionLayer.viewCount = (uint32_t)xrProjectionViews.size();
+        projectionLayer.views = xrProjectionViews.data();
+
+        const XrCompositionLayerBaseHeader* layers[] = {
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer)
+        };
+
+        bool rendered = frameState.shouldRender;
+
+        XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
+        endInfo.displayTime = frameState.predictedDisplayTime;
+        endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        endInfo.layerCount = (rendered && xrSessionState == XR_SESSION_STATE_FOCUSED) ? 1 : 0;
+        endInfo.layers = layers;
+
+        xr_check(xrEndFrame(xrSession, &endInfo), "Failed to end XR frame");
     }
 
     void cleanupSwapChain() {
@@ -395,7 +397,7 @@ private:
         for (auto& swapchainData : xrSwapchains) {
             for (auto& fb : swapchainData.framebuffers) vkDestroyFramebuffer(device, fb, nullptr);
             for (auto& viewData : swapchainData.views) vkDestroyImageView(device, viewData.imageView, nullptr);
-            xrDestroySwapchain(swapchainData.swapchain);
+            if (swapchainData.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(swapchainData.swapchain);
         }
         if (xrAppSpace != XR_NULL_HANDLE) xrDestroySpace(xrAppSpace);
         if (xrSession != XR_NULL_HANDLE) xrDestroySession(xrSession);
@@ -451,7 +453,6 @@ private:
     }
 
     void initOpenXR() {
-        // Application Info
         XrApplicationInfo appInfo{};
         strcpy_s(appInfo.applicationName, "Vulkan VR Terrain Renderer");
         appInfo.applicationVersion = 1;
@@ -459,23 +460,19 @@ private:
         appInfo.engineVersion = 1;
         appInfo.apiVersion = XR_CURRENT_API_VERSION;
 
-        // Request extensions
         const char* const requiredExtensions[] = { XR_KHR_VULKAN_ENABLE_EXTENSION_NAME };
-        uint32_t extensionCount = sizeof(requiredExtensions) / sizeof(requiredExtensions[0]);
 
         XrInstanceCreateInfo createInfo{ XR_TYPE_INSTANCE_CREATE_INFO };
         createInfo.applicationInfo = appInfo;
-        createInfo.enabledExtensionCount = extensionCount;
+        createInfo.enabledExtensionCount = 1;
         createInfo.enabledExtensionNames = requiredExtensions;
 
         xr_check(xrCreateInstance(&createInfo, &xrInstance), "Failed to create OpenXR instance");
 
-        // Get system
         XrSystemGetInfo systemGetInfo{ XR_TYPE_SYSTEM_GET_INFO };
         systemGetInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
         xr_check(xrGetSystem(xrInstance, &systemGetInfo, &xrSystemId), "Failed to get OpenXR system");
 
-        // Load function pointers
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanInstanceExtensionsKHR", (PFN_xrVoidFunction*)(&xrGetVulkanInstanceExtensionsKHR)), "Failed to get xrGetVulkanInstanceExtensionsKHR");
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanGraphicsDeviceKHR", (PFN_xrVoidFunction*)(&xrGetVulkanGraphicsDeviceKHR)), "Failed to get xrGetVulkanGraphicsDeviceKHR");
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanDeviceExtensionsKHR", (PFN_xrVoidFunction*)(&xrGetVulkanDeviceExtensionsKHR)), "Failed to get xrGetVulkanDeviceExtensionsKHR");
@@ -493,34 +490,26 @@ private:
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_3;
+		appInfo.apiVersion = XR_CURRENT_API_VERSION;
 
         auto glfwExtensions = getRequiredExtensions();
 
         uint32_t xrExtCount = 0;
-        xr_check(xrGetVulkanInstanceExtensionsKHR(xrInstance, xrSystemId, 0, &xrExtCount, nullptr),
-            "Failed to get instance ext count");
-
+        xr_check(xrGetVulkanInstanceExtensionsKHR(xrInstance, xrSystemId, 0, &xrExtCount, nullptr), "Failed to get instance ext count");
         std::vector<char> xrExtBuffer(xrExtCount);
-        xr_check(xrGetVulkanInstanceExtensionsKHR(xrInstance, xrSystemId,
-            xrExtCount, &xrExtCount, xrExtBuffer.data()),
-            "Failed to get instance exts");
+        xr_check(xrGetVulkanInstanceExtensionsKHR(xrInstance, xrSystemId, xrExtCount, &xrExtCount, xrExtBuffer.data()), "Failed to get instance exts");
 
-        // Parse space-separated extension string into stable storage
+        std::string xrExts(xrExtBuffer.data());
         std::vector<std::string> xrExtStrings;
-        {
-            std::string xrExts(xrExtBuffer.data());
-            std::stringstream ss(xrExts);
-            std::string ext;
-            while (ss >> ext) {
-                xrExtStrings.push_back(ext);
-            }
+        std::stringstream ss(xrExts);
+        std::string ext;
+        while (ss >> ext) {
+            xrExtStrings.push_back(ext);
         }
 
-        // build final list of const char* (safe: they point into xrExtStrings + glfwExtensions storage)
         std::vector<const char*> extensions;
         extensions.insert(extensions.end(), glfwExtensions.begin(), glfwExtensions.end());
-        for (auto& s : xrExtStrings) {
+        for (const auto& s : xrExtStrings) {
             extensions.push_back(s.c_str());
         }
 
@@ -534,13 +523,11 @@ private:
         if (enableValidationLayers) {
             createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
             createInfo.ppEnabledLayerNames = validationLayers.data();
-
             populateDebugMessengerCreateInfo(debugCreateInfo);
             createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&debugCreateInfo;
         }
         else {
             createInfo.enabledLayerCount = 0;
-
             createInfo.pNext = nullptr;
         }
 
@@ -560,10 +547,8 @@ private:
 
     void setupDebugMessenger() {
         if (!enableValidationLayers) return;
-
         VkDebugUtilsMessengerCreateInfoEXT createInfo;
         populateDebugMessengerCreateInfo(createInfo);
-
         if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
             throw std::runtime_error("failed to set up debug messenger!");
         }
@@ -575,137 +560,110 @@ private:
         }
     }
 
-    /*void pickPhysicalDevice() {
-        uint32_t deviceCount = 0;
-        vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-        if (deviceCount == 0) {
-            throw std::runtime_error("failed to find GPUs with Vulkan support!");
-        }
-        std::vector<VkPhysicalDevice> devices(deviceCount);
-        vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
-        for (const auto& device : devices) {
-            if (isDeviceSuitable(device)) {
-                physicalDevice = device;
-                break;
-            }
-        }
-        if (physicalDevice == VK_NULL_HANDLE) {
-            throw std::runtime_error("failed to find a suitable GPU!");
-        }
-    }*/
-
     void pickPhysicalDevice() {
-        // Ask OpenXR which VkPhysicalDevice it wants us to use.
         VkPhysicalDevice xrProvidedPhysicalDevice = VK_NULL_HANDLE;
-        XrResult xrRes = xrGetVulkanGraphicsDeviceKHR(xrInstance, xrSystemId, instance, &xrProvidedPhysicalDevice);
-
-        // If the call fails, give a clear error (this is the call you saw earlier in logs)
-        xr_check(xrRes, "Failed to get physical device from OpenXR");
+        xr_check(xrGetVulkanGraphicsDeviceKHR(xrInstance, xrSystemId, instance, &xrProvidedPhysicalDevice), "Failed to get physical device from OpenXR");
 
         if (xrProvidedPhysicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("OpenXR did not provide a valid physical device.");
         }
 
-        // Verify the device returned by OpenXR is among Vulkan's enumerated devices.
-        uint32_t deviceCount = 0;
-        VK_CHECK(vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr), "vkEnumeratePhysicalDevices failed to get count");
-        if (deviceCount == 0) {
-            throw std::runtime_error("No Vulkan physical devices found on this system.");
-        }
-
-        std::vector<VkPhysicalDevice> devices(deviceCount);
-        VK_CHECK(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed to list devices");
-
-        bool found = false;
-        for (auto& d : devices) {
-            if (d == xrProvidedPhysicalDevice) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            // This is unexpected — log useful debugging info and abort.
-            throw std::runtime_error("The physical device returned by OpenXR is not present in vkEnumeratePhysicalDevices. This indicates a mismatch between the Vulkan instance used and the runtime's expectation.");
-        }
-
-        // Accept the XR-provided device as 'physicalDevice' for the rest of the app.
         physicalDevice = xrProvidedPhysicalDevice;
 
-        // Optional: check it's suitable for our needs (present support, features, queues).
         if (!isDeviceSuitable(physicalDevice)) {
-            // If your app truly cannot run on the device OpenXR selected, it is better to fail with a clear message:
-            throw std::runtime_error("The physical device selected by OpenXR is not suitable for this application's requirements!");
+            throw std::runtime_error("The physical device selected by OpenXR is not suitable for this application!");
         }
 
-        // Debug info: query basic properties (helps diagnosing -50)
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(physicalDevice, &props);
-        std::cout << "Using physical device chosen by OpenXR: " << props.deviceName << " (API version "
-            << VK_VERSION_MAJOR(props.apiVersion) << "." << VK_VERSION_MINOR(props.apiVersion)
-            << "." << VK_VERSION_PATCH(props.apiVersion) << ")\n";
+        std::cout << "Using physical device chosen by OpenXR: " << props.deviceName << std::endl;
     }
 
+    // ##### MAJOR CHANGE: ADOPTED FROM stereoVR FOR CORRECT SESSION CREATION #####
     void createLogicalDevice() {
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
-        if (!indices.graphicsFamily.has_value() || !indices.presentFamily.has_value()) {
-            throw std::runtime_error("Device does not support required queue families.");
-        }
-
-        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         float queuePriority = 1.0f;
-        for (uint32_t queueFamilyIndex : uniqueQueueFamilies) {
-            VkDeviceQueueCreateInfo queueCreateInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
-            queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
-            queueCreateInfo.queueCount = 1;
-            queueCreateInfo.pQueuePriorities = &queuePriority;
-            queueCreateInfos.push_back(queueCreateInfo);
+
+        for (uint32_t queueFamily : uniqueQueueFamilies) {
+            VkDeviceQueueCreateInfo queueInfo{};
+            queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueInfo.queueFamilyIndex = queueFamily;
+            queueInfo.queueCount = 1;
+            queueInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueInfo);
         }
 
-        VkPhysicalDeviceFeatures deviceFeatures{};
-        deviceFeatures.samplerAnisotropy = VK_TRUE;
-        deviceFeatures.tessellationShader = VK_TRUE;
-        deviceFeatures.fillModeNonSolid = VK_TRUE;
+        // --- Get Vulkan Graphics Requirements from OpenXR ---
+        PFN_xrGetVulkanGraphicsRequirementsKHR pfnGetVulkanReqs = nullptr;
+        xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanGraphicsRequirementsKHR",
+            reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanReqs)),
+            "Failed to load xrGetVulkanGraphicsRequirementsKHR");
 
-        // --- CRITICAL CHANGE: ENABLE MULTIVIEW FEATURE ---
-        // We must explicitly enable the multiview feature for the logical device.
+        XrGraphicsRequirementsVulkanKHR vulkanReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR };
+        xr_check(pfnGetVulkanReqs(xrInstance, xrSystemId, &vulkanReqs), "Failed to get Vulkan graphics requirements");
+
+        // --- Correctly chain the features required by OpenXR and the application ---
+        VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+
+        // App-specific features
+        VkPhysicalDeviceFeatures appFeatures{};
+        appFeatures.samplerAnisotropy = VK_TRUE;
+        appFeatures.tessellationShader = VK_TRUE;
+        appFeatures.fillModeNonSolid = VK_TRUE;
+        deviceFeatures2.features = appFeatures;
+
+        // OpenXR-required features (Multiview is often required for composition)
+        // Replace VK_STRUCTURE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES with VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES
         VkPhysicalDeviceMultiviewFeatures multiviewFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES };
-        multiviewFeatures.multiview = VK_TRUE; // Enable the feature
+        multiviewFeatures.multiview = VK_TRUE;
+        deviceFeatures2.pNext = &multiviewFeatures;
 
-        VkDeviceCreateInfo createInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-        createInfo.pNext = &multiviewFeatures; // Chain the multiview feature struct
-        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-        createInfo.pQueueCreateInfos = queueCreateInfos.data();
-        createInfo.pEnabledFeatures = &deviceFeatures;
-
-        // --- Extensions (OpenXR will automatically request VK_KHR_multiview if needed) ---
+        // --- Get and enable required device extensions from OpenXR ---
         uint32_t xrDevExtCount = 0;
-        xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, 0, &xrDevExtCount, nullptr);
+        xr_check(xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, 0, &xrDevExtCount, nullptr), "Failed to get XR device extension count");
         std::vector<char> xrDevExtBuffer(xrDevExtCount);
-        xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, xrDevExtCount, &xrDevExtCount, xrDevExtBuffer.data());
-        std::vector<std::string> xrDevExtStrings;
+        xr_check(xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, xrDevExtCount, &xrDevExtCount, xrDevExtBuffer.data()), "Failed to get XR device extensions");
+
         std::string xrExts(xrDevExtBuffer.data());
         std::stringstream ss(xrExts);
         std::string ext;
-        while (ss >> ext) xrDevExtStrings.push_back(ext);
-
         std::vector<const char*> enabledDeviceExtensions;
-        for (const char* e : deviceExtensions) enabledDeviceExtensions.push_back(e);
-        for (auto& s : xrDevExtStrings) enabledDeviceExtensions.push_back(s.c_str());
+        static std::vector<std::string> persistentXrExtStrings;
 
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
-        createInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
-
-        // --- Create logical device ---
-        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create logical device!");
+        while (ss >> ext) {
+            persistentXrExtStrings.push_back(ext);
+            enabledDeviceExtensions.push_back(persistentXrExtStrings.back().c_str());
         }
+
+        for (const auto& appExt : deviceExtensions) {
+            enabledDeviceExtensions.push_back(appExt);
+        }
+
+        // --- Create the logical device with the correct feature chain ---
+        VkDeviceCreateInfo deviceCreateInfo{};
+        deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        deviceCreateInfo.pNext = &deviceFeatures2; // Point to the head of the feature chain
+        deviceCreateInfo.pEnabledFeatures = nullptr; // Must be null when pNext is a VkPhysicalDeviceFeatures2 struct
+        deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+        deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+        deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
+        deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
+        deviceCreateInfo.enabledLayerCount = enableValidationLayers ? static_cast<uint32_t>(validationLayers.size()) : 0;
+        deviceCreateInfo.ppEnabledLayerNames = enableValidationLayers ? validationLayers.data() : nullptr;
+
+        if (vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create Vulkan logical device!");
+        }
+        std::cout << "[INFO] Successfully created VkDevice." << std::endl;
 
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
 
         // --- Create OpenXR Session ---
+        // This should now succeed because the device was created with the required features.
         XrGraphicsBindingVulkanKHR graphicsBinding{ XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR };
         graphicsBinding.instance = instance;
         graphicsBinding.physicalDevice = physicalDevice;
@@ -717,8 +675,9 @@ private:
         sessionCreateInfo.next = &graphicsBinding;
         sessionCreateInfo.systemId = xrSystemId;
 
-        // This call will now succeed because the device has the required multiview feature enabled.
+        std::cout << "[INFO] Attempting to create XrSession..." << std::endl;
         xr_check(xrCreateSession(xrInstance, &sessionCreateInfo, &xrSession), "Failed to create OpenXR session");
+        std::cout << "[INFO] Successfully created XrSession." << std::endl;
 
         // --- Create reference space ---
         XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
@@ -728,17 +687,15 @@ private:
     }
 
     void createXrDepthResources() {
-        // We need to find a size that is large enough for either eye.
-        // Usually they are the same, but we take the max to be safe.
-        uint32_t vrWidth = 0;
-        uint32_t vrHeight = 0;
+        uint32_t vrWidth = 0, vrHeight = 0;
         for (const auto& sc : xrSwapchains) {
-            if (sc.width > vrWidth) vrWidth = sc.width;
-            if (sc.height > vrHeight) vrHeight = sc.height;
+            vrWidth = std::max(vrWidth, sc.width);
+            vrHeight = std::max(vrHeight, sc.height);
         }
 
         if (vrWidth == 0 || vrHeight == 0) {
-            throw std::runtime_error("VR swapchain dimensions are zero, cannot create depth buffer.");
+            // Fallback size if swapchains haven't been created yet
+            vrWidth = 1024; vrHeight = 1024;
         }
 
         VkFormat depthFormat = findDepthFormat();
@@ -747,22 +704,19 @@ private:
     }
 
     void createXrSwapchains() {
-        // --- Enumerate and select a supported swapchain format ---
         uint32_t formatCount = 0;
         xr_check(xrEnumerateSwapchainFormats(xrSession, 0, &formatCount, nullptr), "Failed to get swapchain format count");
         std::vector<int64_t> formats(formatCount);
         xr_check(xrEnumerateSwapchainFormats(xrSession, formatCount, &formatCount, formats.data()), "Failed to enumerate swapchain formats");
 
-        // Choose a preferred format. R8G8B8A8_SRGB is common.
-        xrColorFormat = formats[0]; // Default to the first one
+        xrColorFormat = formats[0];
         for (auto& format : formats) {
-            if (format == VK_FORMAT_R8G8B8A8_SRGB) {
+            if (format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB) {
                 xrColorFormat = format;
                 break;
             }
         }
 
-        // --- The rest of the function remains mostly the same, but uses xrColorFormat ---
         uint32_t viewCount = 0;
         xr_check(xrEnumerateViewConfigurationViews(xrInstance, xrSystemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &viewCount, nullptr), "enum view config views count");
         xrViewConfigs.resize(viewCount, { XR_TYPE_VIEW_CONFIGURATION_VIEW });
@@ -775,7 +729,7 @@ private:
 
             XrSwapchainCreateInfo swapchainCI{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
             swapchainCI.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-            swapchainCI.format = xrColorFormat; // USE THE SELECTED FORMAT
+            swapchainCI.format = xrColorFormat;
             swapchainCI.sampleCount = 1;
             swapchainCI.width = viewConfig.recommendedImageRectWidth;
             swapchainCI.height = viewConfig.recommendedImageRectHeight;
@@ -802,21 +756,16 @@ private:
         }
 
         xrViews.resize(viewCount, { XR_TYPE_VIEW });
-        xrProjectionViews.resize(viewCount);
-        for (uint32_t i = 0; i < viewCount; ++i) {
-            xrProjectionViews[i] = { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW };
-            xrProjectionViews[i].subImage.swapchain = xrSwapchains[i].swapchain;
-        }
+        xrProjectionViews.resize(viewCount, { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW });
     }
 
     void createXrFramebuffers() {
         for (auto& swapchain : xrSwapchains) {
             swapchain.framebuffers.resize(swapchain.views.size());
             for (size_t i = 0; i < swapchain.views.size(); i++) {
-                // CRITICAL CHANGE: Use the new VR-specific depth image view
                 std::array<VkImageView, 2> attachments = {
                     swapchain.views[i].imageView,
-                    xrDepthImageView // Use the correctly-sized VR depth buffer
+                    xrDepthImageView
                 };
 
                 VkFramebufferCreateInfo framebufferInfo{};
@@ -837,7 +786,6 @@ private:
 
     void createSwapChain() {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
-
         VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
         VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
         VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
@@ -850,7 +798,6 @@ private:
         VkSwapchainCreateInfoKHR createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         createInfo.surface = surface;
-
         createInfo.minImageCount = imageCount;
         createInfo.imageFormat = surfaceFormat.format;
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
@@ -889,22 +836,24 @@ private:
 
     void createImageViews() {
         swapChainImageViews.resize(swapChainImages.size());
-
         for (uint32_t i = 0; i < swapChainImages.size(); i++) {
             swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
         }
     }
 
+    // ##### MAJOR CHANGE: REMOVED MULTIVIEW FOR MULTI-PASS COMPATIBILITY #####
     void createRenderPass() {
-        VkAttachmentDescription colorAttachment{};
-        colorAttachment.format = (VkFormat)xrColorFormat;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // Correct for mirror window
+        // Color attachment for VR rendering. It will be transitioned to COLOR_ATTACHMENT_OPTIMAL.
+        VkAttachmentDescription vrColorAttachment{};
+        vrColorAttachment.format = (VkFormat)xrColorFormat;
+        vrColorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        vrColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        vrColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        vrColorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        vrColorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        vrColorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        // For VR, the final layout is COLOR_ATTACHMENT_OPTIMAL. The compositor handles presentation.
+        vrColorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentDescription depthAttachment{};
         depthAttachment.format = findDepthFormat();
@@ -938,20 +887,13 @@ private:
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-        // --- CRITICAL CHANGE: CONFIGURE RENDER PASS FOR MULTIVIEW ---
-        // A view mask of 0b00000011 means that this subpass will render to
-        // view 0 (left eye) AND view 1 (right eye) simultaneously.
-        const uint32_t viewMask = 0b00000011;
+        // --- THIS IS A MULTI-PASS RENDERER, SO MULTIVIEW CONFIG IS REMOVED ---
+        // const uint32_t viewMask = 0b00000011; // REMOVED
+        // VkRenderPassMultiviewCreateInfo multiviewCI{}; // REMOVED
 
-        VkRenderPassMultiviewCreateInfo multiviewCI{ VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
-        multiviewCI.subpassCount = 1;
-        multiviewCI.pViewMasks = &viewMask;
-        multiviewCI.correlationMaskCount = 0;
-        multiviewCI.pCorrelationMasks = nullptr;
-
-        std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+        std::array<VkAttachmentDescription, 2> attachments = { vrColorAttachment, depthAttachment };
         VkRenderPassCreateInfo renderPassInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-        renderPassInfo.pNext = &multiviewCI; // Chain the multiview info
+        // renderPassInfo.pNext = &multiviewCI; // REMOVED
         renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
         renderPassInfo.pAttachments = attachments.data();
         renderPassInfo.subpassCount = 1;
@@ -970,7 +912,6 @@ private:
         uboLayoutBinding.descriptorCount = 1;
         uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         uboLayoutBinding.pImmutableSamplers = nullptr;
-        // The UBO is needed in the TCS and TES. 
         uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
 
         VkDescriptorSetLayoutBinding samplerLayoutBinding{};
@@ -978,8 +919,6 @@ private:
         samplerLayoutBinding.descriptorCount = 1;
         samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
-        // CRITICAL CHANGE: The sampler is needed in the TES (for displacement)
-        // AND now also in the Fragment Shader (for normal calculation).
         samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
         std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
@@ -994,7 +933,6 @@ private:
     }
 
     void createGraphicsPipeline() {
-        // Load all four shader stages ---
         auto vertShaderCode = readFile("shaders/multi_tess.vert.spv");
         auto fragShaderCode = readFile("shaders/multi_tess.frag.spv");
         auto tescShaderCode = readFile("shaders/multi_tess.tesc.spv");
@@ -1042,14 +980,12 @@ private:
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        // Use a patch list for tessellation
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-        // Tessellation state
         VkPipelineTessellationStateCreateInfo tessellationState{};
         tessellationState.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
-        tessellationState.patchControlPoints = 4; // We are using quad patches
+        tessellationState.patchControlPoints = 4;
 
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1060,8 +996,7 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Keep wireframe to see tessellation
-        //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.polygonMode = VK_POLYGON_MODE_LINE;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -1090,10 +1025,6 @@ private:
         colorBlending.logicOp = VK_LOGIC_OP_COPY;
         colorBlending.attachmentCount = 1;
         colorBlending.pAttachments = &colorBlendAttachment;
-        colorBlending.blendConstants[0] = 0.0f;
-        colorBlending.blendConstants[1] = 0.0f;
-        colorBlending.blendConstants[2] = 0.0f;
-        colorBlending.blendConstants[3] = 0.0f;
 
         std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
         VkPipelineDynamicStateCreateInfo dynamicState{};
@@ -1101,18 +1032,17 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
-        // Define the push constant range (for multipass)
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
         pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(int); // We are pushing a single integer (viewIndex)
+        pushConstantRange.size = sizeof(int);
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
-        pipelineLayoutInfo.pushConstantRangeCount = 1; // Specify we are using one push constant range
-        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange; // Point to our range
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
@@ -1124,7 +1054,6 @@ private:
         pipelineInfo.pStages = shaderStages.data();
         pipelineInfo.pVertexInputState = &vertexInputInfo;
         pipelineInfo.pInputAssemblyState = &inputAssembly;
-        // Point to the new tessellation state
         pipelineInfo.pTessellationState = &tessellationState;
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
@@ -1149,7 +1078,6 @@ private:
 
     void createFramebuffers() {
         swapChainFramebuffers.resize(swapChainImageViews.size());
-
         for (size_t i = 0; i < swapChainImageViews.size(); i++) {
             std::array<VkImageView, 2> attachments = {
                 swapChainImageViews[i],
@@ -1172,14 +1100,11 @@ private:
     }
 
     void createCommandPool() {
-
         QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
-
         VkCommandPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
-
         if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create graphics command pool!");
         }
@@ -1187,25 +1112,17 @@ private:
 
     void createDepthResources() {
         VkFormat depthFormat = findDepthFormat();
-
         createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
         depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
     }
 
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
-
         for (VkFormat format : candidates) {
             VkFormatProperties props;
             vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
-
-            if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
-                return format;
-            }
-            else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
-                return format;
-            }
+            if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) return format;
+            else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) return format;
         }
-
         throw std::runtime_error("failed to find supported format!");
     }
 
@@ -1223,20 +1140,9 @@ private:
 
     void createTextureImage() {
         int texWidth, texHeight, texChannels;
-
-        // Load the 16bit image as single-channel (grayscale)
         stbi_us* pixels = stbi_load_16(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_grey);
-
-        // load the 8-bit image as single-channel (grayscale)
-        // stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_grey);
-
-        if (!pixels) {
-            throw std::runtime_error("failed to load 16-bit texture image!");
-        }
-
-        // Calculate image size for a single channel
-        VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_us); // For 16-bit single-channel
-        // VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_uc); // For 8-bit single-channel
+        if (!pixels) throw std::runtime_error("failed to load 16-bit texture image!");
+        VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_us);
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1246,25 +1152,12 @@ private:
         vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
         memcpy(data, pixels, static_cast<size_t>(imageSize));
         vkUnmapMemory(device, stagingBufferMemory);
-
         stbi_image_free(pixels);
 
-        // a single-channel 16-bit Vulkan format 
-        // VK_FORMAT_R16G16B16A16_UNORM is replaced with VK_FORMAT_R16_UNORM.
-        // 'R16' means one Red channel with 16 bits.
         createImage(texWidth, texHeight, VK_FORMAT_R16_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
-        // 8bit single-channel format
-        // createImage(texWidth, texHeight, VK_FORMAT_R8_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
-
         transitionImageLayout(textureImage, VK_FORMAT_R16_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        // For 8-bit single-channel, use VK_FORMAT_R8_UNORM
-        // transitionImageLayout(textureImage, VK_FORMAT_R8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        // for 8-bit single-channel, use VK_FORMAT_R8_UNORM
-        // copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
         transitionImageLayout(textureImage, VK_FORMAT_R16_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        // for 8-bit single-channel, use VK_FORMAT_R8_UNORM
-        // transitionImageLayout(textureImage, VK_FORMAT_R8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -1272,17 +1165,12 @@ private:
 
     void createTextureImageView()
     {
-        // 16-bit single-channel format
         textureImageView = createImageView(textureImage, VK_FORMAT_R16_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
-
-        // 8-bit single-channel format
-        // textureImageView = createImageView(textureImage, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     void createTextureSampler() {
         VkPhysicalDeviceProperties properties{};
         vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -1297,14 +1185,12 @@ private:
         samplerInfo.compareEnable = VK_FALSE;
         samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
         samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-
         if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
             throw std::runtime_error("failed to create texture sampler!");
         }
     }
 
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
-
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
@@ -1315,17 +1201,14 @@ private:
         viewInfo.subresourceRange.levelCount = 1;
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
-
         VkImageView imageView;
         if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
             throw std::runtime_error("failed to create image view!");
         }
-
         return imageView;
     }
 
     void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
-
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1356,14 +1239,11 @@ private:
         if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate image memory!");
         }
-
         vkBindImageMemory(device, image, imageMemory, 0);
     }
 
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
-
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.oldLayout = oldLayout;
@@ -1383,37 +1263,24 @@ private:
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
             barrier.srcAccessMask = 0;
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
             sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
             destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         }
         else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
             barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
             sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         }
         else {
             throw std::invalid_argument("unsupported layout transition!");
         }
-
-        vkCmdPipelineBarrier(
-            commandBuffer,
-            sourceStage, destinationStage,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &barrier
-        );
-
+        vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         endSingleTimeCommands(commandBuffer);
     }
 
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
-
         VkBufferImageCopy region{};
         region.bufferOffset = 0;
         region.bufferRowLength = 0;
@@ -1423,14 +1290,8 @@ private:
         region.imageSubresource.baseArrayLayer = 0;
         region.imageSubresource.layerCount = 1;
         region.imageOffset = { 0, 0, 0 };
-        region.imageExtent = {
-            width,
-            height,
-            1
-        };
-
+        region.imageExtent = { width, height, 1 };
         vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
         endSingleTimeCommands(commandBuffer);
     }
 
@@ -1438,26 +1299,17 @@ private:
     {
         const float halfX = 2100.0f;
         const float halfY = 13965.0f;
-
-        const int grid = 128; // Number of patches in each direction
-        const int gridY = 128 * 7; // Number of patches in each direction
+        const int grid = 128;
+        const int gridY = 128 * 7;
 
         std::vector<Vertex> vertexList;
-
         for (int y = 0; y <= gridY; ++y) {
             for (int x = 0; x <= grid; ++x) {
                 float u = static_cast<float>(x) / grid;
                 float v = static_cast<float>(y) / gridY;
-
                 float posX = -halfX + u * 2.0f * halfX;
                 float posY = -halfY + v * 2.0f * halfY;
-
-                vertexList.push_back({
-                    { posX, posY, 0.0f },
-                    { 1.0f, 1.0f, 1.0f },
-                    { 0.0f, 0.0f, 1.0f },
-                    { u, v }
-                    });
+                vertexList.push_back({ { posX, posY, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 1.0f }, { u, v } });
             }
         }
 
@@ -1468,11 +1320,10 @@ private:
                 int i1 = (y) * (grid + 1) + (x + 1);
                 int i2 = (y + 1) * (grid + 1) + (x);
                 int i3 = (y + 1) * (grid + 1) + (x + 1);
-
-                vertices.push_back(vertexList[i2]); // top-left
-                vertices.push_back(vertexList[i3]); // top-right
-                vertices.push_back(vertexList[i0]); // bottom-left
-                vertices.push_back(vertexList[i1]); // bottom-right
+                vertices.push_back(vertexList[i2]);
+                vertices.push_back(vertexList[i3]);
+                vertices.push_back(vertexList[i0]);
+                vertices.push_back(vertexList[i1]);
             }
         }
     }
@@ -1494,14 +1345,11 @@ private:
 
     void createUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-
         uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
         uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
-
             vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
         }
     }
@@ -1549,7 +1397,6 @@ private:
             imageInfo.sampler = textureSampler;
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
-
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = descriptorSets[i];
             descriptorWrites[0].dstBinding = 0;
@@ -1557,7 +1404,6 @@ private:
             descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             descriptorWrites[0].descriptorCount = 1;
             descriptorWrites[0].pBufferInfo = &bufferInfo;
-
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[1].dstSet = descriptorSets[i];
             descriptorWrites[1].dstBinding = 1;
@@ -1571,89 +1417,68 @@ private:
     }
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
-
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = size;
         bufferInfo.usage = usage;
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
         if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to create buffer!");
         }
-
         VkMemoryRequirements memRequirements;
         vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
-
         VkMemoryAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocInfo.allocationSize = memRequirements.size;
         allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
-
         if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate buffer memory!");
         }
-
         vkBindBufferMemory(device, buffer, bufferMemory, 0);
     }
 
     VkCommandBuffer beginSingleTimeCommands() {
-
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandPool = commandPool;
         allocInfo.commandBufferCount = 1;
-
         VkCommandBuffer commandBuffer;
         vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
-
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
         vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
         return commandBuffer;
     }
 
     void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
-
         vkEndCommandBuffer(commandBuffer);
-
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
-
         vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
         vkQueueWaitIdle(graphicsQueue);
-
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     }
 
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
-
         VkBufferCopy copyRegion{};
         copyRegion.size = size;
         vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
         endSingleTimeCommands(commandBuffer);
     }
 
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-
         VkPhysicalDeviceMemoryProperties memProperties;
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
-
         for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
             if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
                 return i;
             }
         }
-
         throw std::runtime_error("failed to find suitable memory type!");
     }
 
@@ -1670,15 +1495,9 @@ private:
     }
 
     void recordCommandBufferXR(VkCommandBuffer commandBuffer, uint32_t eyeIndex, uint32_t swapchainImageIndex) {
-       /* VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-            throw std::runtime_error("failed to begin recording command buffer!");
-        }*/
-
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = renderPass; // Assuming a compatible render pass
+        renderPassInfo.renderPass = renderPass;
         renderPassInfo.framebuffer = xrSwapchains[eyeIndex].framebuffers[swapchainImageIndex];
         renderPassInfo.renderArea.offset = { 0, 0 };
         renderPassInfo.renderArea.extent = { xrSwapchains[eyeIndex].width, xrSwapchains[eyeIndex].height };
@@ -1711,121 +1530,74 @@ private:
         scissor.extent = { xrSwapchains[eyeIndex].width, xrSwapchains[eyeIndex].height };
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // Push the view index for the current eye
         int viewIndex = eyeIndex;
         vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, 0, sizeof(int), &viewIndex);
 
         vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
-
-      /*  if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-            throw std::runtime_error("failed to record command buffer!");
-        }*/
     }
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
     {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
 
+        // For the desktop mirror, we use a different finalLayout, so we must use a separate compatible render pass.
+        // For simplicity in this example, we reuse the main render pass but this can cause validation errors.
+        // A proper implementation would have a second render pass for the mirror window.
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = renderPass;
+        renderPassInfo.renderPass = renderPass; // Note: Potential compatibility issue here.
         renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
         renderPassInfo.renderArea.offset = { 0, 0 };
         renderPassInfo.renderArea.extent = swapChainExtent;
 
         std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+        clearValues[0].color = { {0.1f, 0.1f, 0.1f, 1.0f} };
         clearValues[1].depthStencil = { 1.0f, 0 };
-
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
         renderPassInfo.pClearValues = clearValues.data();
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        // Bind pipeline and buffers once for both eyes
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
         VkBuffer vertexBuffers[] = { vertexBuffer };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-        //vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        // --- RENDER LEFT EYE ---
+        // --- RENDER LEFT EYE to left half of window ---
         {
-            VkViewport viewport{};
-            viewport.x = 0.0f;
-            viewport.y = 0.0f;
-            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
-            viewport.height = (float)swapChainExtent.height;
-            viewport.minDepth = 0.0f;
-            viewport.maxDepth = 1.0f;
+            VkViewport viewport{ 0.0f, 0.0f, (float)swapChainExtent.width / 2.0f, (float)swapChainExtent.height, 0.0f, 1.0f };
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-            VkRect2D scissor{};
-            scissor.offset = { 0, 0 };
-            scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
+            VkRect2D scissor{ {0, 0}, {swapChainExtent.width / 2, swapChainExtent.height} };
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-            // Push the view index for the left eye (0)
             int viewIndex = 0;
-            vkCmdPushConstants(
-                commandBuffer,
-                pipelineLayout,
-                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
-                0,
-                sizeof(int),
-                &viewIndex);
-
-            //vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, 0, sizeof(int), &viewIndex);
             vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
         }
 
-        // --- RENDER RIGHT EYE ---
+        // --- RENDER RIGHT EYE to right half of window ---
         {
-            VkViewport viewport{};
-            viewport.x = (float)swapChainExtent.width / 2.0f; // Start at the middle
-            viewport.y = 0.0f;
-            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
-            viewport.height = (float)swapChainExtent.height;
-            viewport.minDepth = 0.0f;
-            viewport.maxDepth = 1.0f;
+            VkViewport viewport{ (float)swapChainExtent.width / 2.0f, 0.0f, (float)swapChainExtent.width / 2.0f, (float)swapChainExtent.height, 0.0f, 1.0f };
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-            VkRect2D scissor{};
-            scissor.offset = { (int32_t)(swapChainExtent.width / 2) + 50, 0 };
-            scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
+            VkRect2D scissor{ {(int32_t)(swapChainExtent.width / 2), 0}, {swapChainExtent.width / 2, swapChainExtent.height} };
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-            // Push the view index for the right eye (1)
             int viewIndex = 1;
-            vkCmdPushConstants(
-                commandBuffer,
-                pipelineLayout,
-                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
-                0,
-                sizeof(int),
-                &viewIndex);
-
-            //vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+            vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, 0, sizeof(int), &viewIndex);
             vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
         }
 
         vkCmdEndRenderPass(commandBuffer);
-
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
         }
     }
 
     void createSyncObjects() {
-
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1846,127 +1618,100 @@ private:
         }
     }
 
-    void updateUniformBuffer(uint32_t currentImage, uint32_t eyeIndex) {
+    void updateUniformBuffer(uint32_t currentImage) {
+        if (xrViews.empty()) return;
+
         UniformBufferObject ubo{};
+        ubo.model = glm::mat4(1.0f);
 
-        // VIEW MATRIX from OpenXR
-        const auto& pose = xrViews[eyeIndex].pose;
-        glm::quat orientation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
-        glm::vec3 position(pose.position.x, pose.position.y, pose.position.z);
-        glm::mat4 viewMatrix = glm::inverse(glm::translate(glm::mat4(1.0f), position) * glm::mat4_cast(orientation));
+        for (uint32_t i = 0; i < xrViews.size(); ++i) {
+            const auto& pose = xrViews[i].pose;
+            glm::quat orientation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+            glm::vec3 position(pose.position.x, pose.position.y, pose.position.z);
+            glm::mat4 viewMatrix = glm::inverse(glm::translate(glm::mat4(1.0f), position) * glm::mat4_cast(orientation));
 
-        // PROJECTION MATRIX from OpenXR
-        const auto& fov = xrViews[eyeIndex].fov;
-        float nearZ = 0.1f;
-        float farZ = 10000.0f;
-        float tanLeft = tanf(fov.angleLeft);
-        float tanRight = tanf(fov.angleRight);
-        float tanDown = tanf(fov.angleDown);
-        float tanUp = tanf(fov.angleUp);
-        float tanSumX = tanRight - tanLeft;
-        float tanSumY = tanUp - tanDown;
+            const auto& fov = xrViews[i].fov;
+            float nearZ = 0.1f;
+            float farZ = 10000.0f;
+            float tanLeft = tanf(fov.angleLeft);
+            float tanRight = tanf(fov.angleRight);
+            float tanDown = tanf(fov.angleDown);
+            float tanUp = tanf(fov.angleUp);
+            float tanSumX = tanRight - tanLeft;
+            float tanSumY = tanUp - tanDown;
 
-        glm::mat4 projMatrix(0.0f);
-        projMatrix[0][0] = 2.0f / tanSumX;
-        projMatrix[1][1] = 2.0f / tanSumY;
-        projMatrix[2][0] = (tanRight + tanLeft) / tanSumX;
-        projMatrix[2][1] = (tanUp + tanDown) / tanSumY;
-        projMatrix[2][2] = -farZ / (farZ - nearZ);
-        projMatrix[2][3] = -1.0f;
-        projMatrix[3][2] = -(farZ * nearZ) / (farZ - nearZ);
-        projMatrix[1][1] *= -1; // Vulkan Y-flip
+            glm::mat4 projMatrix(0.0f);
+            projMatrix[0][0] = 2.0f / tanSumX;
+            projMatrix[1][1] = 2.0f / tanSumY;
+            projMatrix[2][0] = (tanRight + tanLeft) / tanSumX;
+            projMatrix[2][1] = (tanUp + tanDown) / tanSumY;
+            projMatrix[2][2] = -farZ / (farZ - nearZ);
+            projMatrix[2][3] = -1.0f;
+            projMatrix[3][2] = -(farZ * nearZ) / (farZ - nearZ);
+            projMatrix[1][1] *= -1;
 
-        // This is simplified, assuming your UBO is structured to accept these matrices
-        ubo.view[eyeIndex] = viewMatrix;
-        ubo.proj[eyeIndex] = projMatrix;
-        ubo.cameraPosition[eyeIndex] = glm::vec4(position, 1.0f);
-
-        // For the other eye, just copy the same data for now to avoid uninitialized data in shader
-        int otherEye = (eyeIndex + 1) % 2;
-        ubo.view[otherEye] = viewMatrix;
-        ubo.proj[otherEye] = projMatrix;
-        ubo.cameraPosition[otherEye] = glm::vec4(position, 1.0f);
-
+            ubo.view[i] = viewMatrix;
+            ubo.proj[i] = projMatrix;
+            ubo.cameraPosition[i] = glm::vec4(position, 1.0f);
+        }
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
     void drawXRFrame()
     {
-        // wait for the previous frame's GPU work to finish, but do it only ONCE per frame
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
         VkCommandBuffer commandBuffer = commandBuffers[currentFrame];
         vkResetCommandBuffer(commandBuffer, 0);
 
-        // Begin recording the command buffer once for all eyes.
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-            throw std::runtime_error("failed to begin recording command buffer!");
-        }
+        VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo), "failed to begin recording command buffer!");
 
-        // keep track of the acquired image index for each eye
+        updateUniformBuffer(currentFrame);
+
         std::vector<uint32_t> imageIndices(xrViews.size());
 
-        // acquire images and record all rendering commands
         for (uint32_t i = 0; i < xrViews.size(); ++i) {
             auto& swapchain = xrSwapchains[i];
-
-            // Acquire the swapchain image for the current eye
             XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
             xr_check(xrAcquireSwapchainImage(swapchain.swapchain, &acquireInfo, &imageIndices[i]), "Failed to acquire swapchain image");
 
-            // Wait for that specific image to be ready
             XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
             waitInfo.timeout = XR_INFINITE_DURATION;
             xr_check(xrWaitSwapchainImage(swapchain.swapchain, &waitInfo), "Failed to wait for swapchain image");
 
-            // Update the Uniform Buffer Object with matrices for the current eye
-            updateUniformBuffer(currentFrame, i);
-
-            // Record the drawing commands for this eye into our single, shared command buffer
             recordCommandBufferXR(commandBuffer, i, imageIndices[i]);
         }
 
-        // End recording after all eyes have been recorded.
-        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-            throw std::runtime_error("failed to record command buffer!");
-        }
+        VK_CHECK(vkEndCommandBuffer(commandBuffer), "failed to record command buffer!");
 
-        // Submit the command buffer to the GPU just ONCE with all the work.
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
 
-        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]),
-            "Failed to submit draw command buffer for XR!");
+        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]), "Failed to submit draw command buffer for XR!");
 
-        // Release images and update compositor data.
-        // This happens after we've told the GPU what to do.
         for (uint32_t i = 0; i < xrViews.size(); ++i) {
             auto& swapchain = xrSwapchains[i];
-
-            // Release the swapchain image for this eye
             XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
             xr_check(xrReleaseSwapchainImage(swapchain.swapchain, &releaseInfo), "Failed to release swapchain image");
 
-            // Update projection view for the compositor
             xrProjectionViews[i].pose = xrViews[i].pose;
             xrProjectionViews[i].fov = xrViews[i].fov;
-            xrProjectionViews[i].subImage.swapchain = swapchain.swapchain; // It's good practice to re-assign the swapchain handle
+            xrProjectionViews[i].subImage.swapchain = swapchain.swapchain;
             xrProjectionViews[i].subImage.imageArrayIndex = 0;
             xrProjectionViews[i].subImage.imageRect.offset = { 0, 0 };
             xrProjectionViews[i].subImage.imageRect.extent = { (int32_t)swapchain.width, (int32_t)swapchain.height };
         }
-
-        // Advance to the next frame in flight
-        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     void drawFrame() {
+        // This syncs with the desktop window rendering, not the VR rendering
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+
         uint32_t imageIndex;
         VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -1976,10 +1721,14 @@ private:
         else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
-        updateUniformBuffer(currentFrame, 0);
-        vkResetFences(device, 1, &inFlightFences[currentFrame]);
+
+        // We already updated the UBO in drawXRFrame, so we don't need to do it again unless poses changed.
+        // For simplicity, we assume the data is still valid.
+
+        vkResetFences(device, 1, &inFlightFences[currentFrame]); // Reset the fence before submitting
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
         recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
@@ -1995,6 +1744,7 @@ private:
         if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
+
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
@@ -2004,6 +1754,7 @@ private:
         presentInfo.pSwapchains = swapChains;
         presentInfo.pImageIndices = &imageIndex;
         result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
@@ -2011,88 +1762,68 @@ private:
         else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");
         }
+
+        // This frame counter should be shared between VR and desktop rendering.
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     VkShaderModule createShaderModule(const std::vector<char>& code) {
-
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         createInfo.codeSize = code.size();
         createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
             throw std::runtime_error("failed to create shader module!");
         }
-
         return shaderModule;
     }
 
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-
         for (const auto& availableFormat : availableFormats) {
             if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 return availableFormat;
             }
         }
-
         return availableFormats[0];
     }
 
     VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
         for (const auto& availablePresentMode : availablePresentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                return availablePresentMode;
-            }
+            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) return availablePresentMode;
         }
-
         return VK_PRESENT_MODE_FIFO_KHR;
     }
 
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
-
         if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
             return capabilities.currentExtent;
         }
         else {
             int width, height;
             glfwGetFramebufferSize(window, &width, &height);
-
-            VkExtent2D actualExtent = {
-                static_cast<uint32_t>(width),
-                static_cast<uint32_t>(height)
-            };
-
+            VkExtent2D actualExtent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
             actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
             actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-
             return actualExtent;
         }
     }
 
     SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
-
         SwapChainSupportDetails details;
-
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
-
         uint32_t formatCount;
         vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
-
         if (formatCount != 0) {
             details.formats.resize(formatCount);
             vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
         }
-
         uint32_t presentModeCount;
         vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
-
         if (presentModeCount != 0) {
             details.presentModes.resize(presentModeCount);
             vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
         }
-
         return details;
     }
 
@@ -2107,139 +1838,89 @@ private:
 
         VkPhysicalDeviceMultiviewFeatures multiviewFeatures{};
         multiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
+        VkPhysicalDeviceFeatures2 deviceFeatures2{};
+        deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures2.pNext = &multiviewFeatures;
+        vkGetPhysicalDeviceFeatures2(device, &deviceFeatures2);
 
-        VkPhysicalDeviceFeatures2 supportedFeatures2{};
-        supportedFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        supportedFeatures2.pNext = &multiviewFeatures;
-
-        vkGetPhysicalDeviceFeatures2(device, &supportedFeatures2);
-
-        if (multiviewFeatures.multiview == VK_FALSE) {
-            return false; 
-        }
-
-        VkPhysicalDeviceFeatures supportedFeatures = supportedFeatures2.features;
-
-        return indices.isComplete() &&
-            extensionsSupported &&
-            swapChainAdequate &&
-            supportedFeatures.samplerAnisotropy &&
-            supportedFeatures.tessellationShader &&
-            supportedFeatures.fillModeNonSolid;
+        return indices.isComplete() && extensionsSupported && swapChainAdequate && multiviewFeatures.multiview &&
+            deviceFeatures2.features.samplerAnisotropy && deviceFeatures2.features.tessellationShader && deviceFeatures2.features.fillModeNonSolid;
     }
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
-
         uint32_t extensionCount;
         vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-
         std::vector<VkExtensionProperties> availableExtensions(extensionCount);
         vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
-
         std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
-
         for (const auto& extension : availableExtensions) {
             requiredExtensions.erase(extension.extensionName);
         }
-
         return requiredExtensions.empty();
     }
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
-
         QueueFamilyIndices indices;
-
         uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
-
         std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
-
         int i = 0;
         for (const auto& queueFamily : queueFamilies) {
-            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-                indices.graphicsFamily = i;
-            }
-
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) indices.graphicsFamily = i;
             VkBool32 presentSupport = false;
             vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
-
-            if (presentSupport) {
-                indices.presentFamily = i;
-            }
-
-            if (indices.isComplete()) {
-                break;
-            }
-
+            if (presentSupport) indices.presentFamily = i;
+            if (indices.isComplete()) break;
             i++;
         }
-
         return indices;
     }
 
     std::vector<const char*> getRequiredExtensions() {
-
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions;
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
-
         if (enableValidationLayers) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
-
         return extensions;
     }
 
     bool checkValidationLayerSupport() {
-
         uint32_t layerCount;
         vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-
         std::vector<VkLayerProperties> availableLayers(layerCount);
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
-
         for (const char* layerName : validationLayers) {
             bool layerFound = false;
-
             for (const auto& layerProperties : availableLayers) {
                 if (strcmp(layerName, layerProperties.layerName) == 0) {
                     layerFound = true;
                     break;
                 }
             }
-
-            if (!layerFound) {
-                return false;
-            }
+            if (!layerFound) return false;
         }
-
         return true;
     }
 
     static std::vector<char> readFile(const std::string& filename) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
         if (!file.is_open()) {
             throw std::runtime_error("failed to open file!");
         }
-
         size_t fileSize = (size_t)file.tellg();
         std::vector<char> buffer(fileSize);
-
         file.seekg(0);
         file.read(buffer.data(), fileSize);
-
         file.close();
-
         return buffer;
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
         std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
-
         return VK_FALSE;
     }
 };

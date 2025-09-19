@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#define VK_API_VERSION_1_2
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -10,7 +11,6 @@
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-// for smooth camera movement, lerp, slerp
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtx/quaternion.hpp>
 
@@ -37,7 +37,8 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
-#include <thread> // For sleeping in the main loop
+#include <thread>
+#include <sstream>
 
 // --- OPENXR HEADERS ---
 #define XR_USE_PLATFORM_WIN32
@@ -63,7 +64,7 @@ const std::vector<const char*> validationLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME // Still needed for OpenXR Vulkan init
 };
 
 #ifdef NDEBUG
@@ -72,14 +73,12 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
-// --- OPENXR HELPER FUNCTION ---
 inline void xr_check(XrResult result, const std::string& message)
 {
     if (XR_FAILED(result)) {
         throw std::runtime_error(message + " (XR Result: " + std::to_string(result) + ")");
     }
 }
-// --- END OPENXR HELPER ---
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
     auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
@@ -100,7 +99,7 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentFamily;
+    std::optional<uint32_t> presentFamily; // Still useful to check for surface support
 
     bool isComplete() {
         return graphicsFamily.has_value() && presentFamily.has_value();
@@ -154,7 +153,6 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 cameraPosition[2];
 };
 
-// --- OPENXR STRUCTS ---
 struct XrViewData
 {
     VkImage image;
@@ -170,7 +168,6 @@ struct XrSwapchainData
     std::vector<XrViewData> views;
     std::vector<VkFramebuffer> framebuffers;
 };
-// --- END OPENXR STRUCTS ---
 
 class TerrainRenderer {
 public:
@@ -178,7 +175,7 @@ public:
     {
         initWindow();
         initVulkan();
-        mainLoopXR(); // Changed to the OpenXR main loop
+        mainLoopXR();
         cleanup();
     }
 
@@ -195,26 +192,12 @@ private:
     VkQueue graphicsQueue;
     VkQueue presentQueue;
 
-    // Desktop mirror swapchain
-    VkSwapchainKHR swapChain;
-    std::vector<VkImage> swapChainImages;
-    VkFormat swapChainImageFormat;
-    VkExtent2D swapChainExtent;
-    std::vector<VkImageView> swapChainImageViews;
-    std::vector<VkFramebuffer> swapChainFramebuffers;
-
-    VkRenderPass renderPass;
+    VkRenderPass xrRenderPass;
     VkDescriptorSetLayout descriptorSetLayout;
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
-
     VkCommandPool commandPool;
 
-    VkImage depthImage; // For desktop mirror
-    VkDeviceMemory depthImageMemory;
-    VkImageView depthImageView;
-
-    // VR-specific resources
     VkImage xrDepthImage;
     VkDeviceMemory xrDepthImageMemory;
     VkImageView xrDepthImageView;
@@ -232,15 +215,11 @@ private:
 
     VkDescriptorPool descriptorPool;
     std::vector<VkDescriptorSet> descriptorSets;
-
     std::vector<VkCommandBuffer> commandBuffers;
 
-    std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
-
-    bool framebufferResized = false;
 
     // --- OPENXR MEMBER VARIABLES ---
     XrInstance xrInstance = XR_NULL_HANDLE;
@@ -251,57 +230,34 @@ private:
     std::vector<XrSwapchainData> xrSwapchains;
     int64_t xrColorFormat;
     std::vector<XrViewConfigurationView> xrViewConfigs;
-    std::vector<XrView> xrViews; // Per-eye view info (pose, fov)
-    std::vector<XrCompositionLayerProjectionView> xrProjectionViews; // Per-eye projection layer info
+    std::vector<XrView> xrViews;
+    std::vector<XrCompositionLayerProjectionView> xrProjectionViews;
 
-    // OpenXR function pointers
     PFN_xrGetVulkanInstanceExtensionsKHR xrGetVulkanInstanceExtensionsKHR = nullptr;
     PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensionsKHR = nullptr;
     PFN_xrGetVulkanGraphicsDeviceKHR xrGetVulkanGraphicsDeviceKHR = nullptr;
-    // --- END OPENXR MEMBER VARIABLES ---
-
 
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan VR Terrain Renderer", nullptr, nullptr);
-        glfwSetWindowUserPointer(window, this);
-        glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
-    }
-
-    static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-        auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(window));
-        app->framebufferResized = true;
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan VR Terrain Renderer (Headset Only)", nullptr, nullptr);
     }
 
     void initVulkan()
     {
-        initOpenXR(); // Initialize OpenXR first
+        initOpenXR();
         createInstance();
         setupDebugMessenger();
         createSurface();
-        pickPhysicalDevice(); // Must be OpenXR-aware now
-        createLogicalDevice(); // Creates VkDevice AND XrSession
-
+        pickPhysicalDevice();
+        createLogicalDevice();
         createCommandPool();
-
-        createXrSwapchains(); // Create VR swapchains
-
-        // Create desktop mirror swapchain
-        createSwapChain();
-        createImageViews();
-
-        createRenderPass(); // Must be compatible with VR format
-
-        createXrDepthResources(); // VR depth buffer
-        createXrFramebuffers();   // VR framebuffers
-
+        createXrSwapchains();
+        createXrRenderPass();
+        createXrDepthResources();
+        createXrFramebuffers();
         createDescriptorSetLayout();
         createGraphicsPipeline();
-
-        createDepthResources(); // Desktop depth buffer
-        createFramebuffers();   // Desktop framebuffers
-
         loadModel();
         createVertexBuffer();
         createIndexBuffer();
@@ -312,99 +268,93 @@ private:
         createSyncObjects();
     }
 
-    // NEW: OpenXR Main Loop
     void mainLoopXR() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
 
-            // Poll OpenXR events
-            XrEventDataBuffer eventData{ XR_TYPE_EVENT_DATA_BUFFER };
-            while (xrPollEvent(xrInstance, &eventData) == XR_SUCCESS) {
-                if (eventData.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
-                    auto sessionStateChanged = *reinterpret_cast<XrEventDataSessionStateChanged*>(&eventData);
-                    xrSessionState = sessionStateChanged.state;
+            bool sessionIsReady = (xrSessionState == XR_SESSION_STATE_READY || xrSessionState == XR_SESSION_STATE_FOCUSED);
 
-                    switch (xrSessionState) {
-                    case XR_SESSION_STATE_READY: {
-                        XrSessionBeginInfo beginInfo{ XR_TYPE_SESSION_BEGIN_INFO };
-                        beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                        xr_check(xrBeginSession(xrSession, &beginInfo), "Failed to begin session");
-                        break;
-                    }
-                    case XR_SESSION_STATE_STOPPING: {
-                        xr_check(xrEndSession(xrSession), "Failed to end session");
-                        break;
-                    }
-                    case XR_SESSION_STATE_EXITING:
-                    case XR_SESSION_STATE_LOSS_PENDING:
-                        glfwSetWindowShouldClose(window, true);
-                        break;
-                    }
+            handleXrEvents();
+
+            if (sessionIsReady) {
+                XrFrameState frameState{ XR_TYPE_FRAME_STATE };
+                xr_check(xrWaitFrame(xrSession, nullptr, &frameState), "Failed to wait for XR frame");
+                xr_check(xrBeginFrame(xrSession, nullptr), "Failed to begin XR frame");
+
+                if (frameState.shouldRender) {
+                    locateXrViews(frameState);
+                    drawXRFrame();
                 }
-                eventData = { XR_TYPE_EVENT_DATA_BUFFER };
-            }
 
-            if (xrSessionState != XR_SESSION_STATE_READY && xrSessionState != XR_SESSION_STATE_FOCUSED) {
+                endXrFrame(frameState, frameState.shouldRender);
+            }
+            else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
             }
-
-            // OpenXR Frame Loop
-            XrFrameState frameState{ XR_TYPE_FRAME_STATE };
-            xr_check(xrWaitFrame(xrSession, nullptr, &frameState), "Failed to wait for XR frame");
-
-            xr_check(xrBeginFrame(xrSession, nullptr), "Failed to begin XR frame");
-
-            if (frameState.shouldRender) {
-                // Get headset pose and projection matrices
-                XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
-                viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                viewLocateInfo.displayTime = frameState.predictedDisplayTime;
-                viewLocateInfo.space = xrAppSpace;
-
-                XrViewState viewState{ XR_TYPE_VIEW_STATE };
-                uint32_t viewCount = xrViews.size();
-                xr_check(xrLocateViews(xrSession, &viewLocateInfo, &viewState, viewCount, &viewCount, xrViews.data()), "Failed to locate views");
-
-                drawXRFrame();
-            }
-
-            // Submit frame to OpenXR compositor
-            XrCompositionLayerProjection layer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
-            layer.space = xrAppSpace;
-            layer.viewCount = xrProjectionViews.size();
-            layer.views = xrProjectionViews.data();
-            const XrCompositionLayerBaseHeader* layers[] = { (XrCompositionLayerBaseHeader*)&layer };
-
-            XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
-            endInfo.displayTime = frameState.predictedDisplayTime;
-            endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-            endInfo.layerCount = (xrSessionState == XR_SESSION_STATE_FOCUSED) ? 1 : 0;
-            endInfo.layers = layers;
-
-            xr_check(xrEndFrame(xrSession, &endInfo), "Failed to end XR frame");
         }
         vkDeviceWaitIdle(device);
     }
 
-    void cleanupSwapChain() {
-        vkDestroyImageView(device, depthImageView, nullptr);
-        vkDestroyImage(device, depthImage, nullptr);
-        vkFreeMemory(device, depthImageMemory, nullptr);
-        for (auto framebuffer : swapChainFramebuffers) {
-            vkDestroyFramebuffer(device, framebuffer, nullptr);
+    void handleXrEvents() {
+        XrEventDataBuffer eventData{ XR_TYPE_EVENT_DATA_BUFFER };
+        while (xrPollEvent(xrInstance, &eventData) == XR_SUCCESS) {
+            if (eventData.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+                auto sessionStateChanged = *reinterpret_cast<XrEventDataSessionStateChanged*>(&eventData);
+                xrSessionState = sessionStateChanged.state;
+
+                switch (xrSessionState) {
+                case XR_SESSION_STATE_READY: {
+                    XrSessionBeginInfo beginInfo{ XR_TYPE_SESSION_BEGIN_INFO };
+                    beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                    xr_check(xrBeginSession(xrSession, &beginInfo), "Failed to begin session");
+                    break;
+                }
+                case XR_SESSION_STATE_STOPPING: {
+                    xr_check(xrEndSession(xrSession), "Failed to end session");
+                    break;
+                }
+                case XR_SESSION_STATE_EXITING:
+                case XR_SESSION_STATE_LOSS_PENDING:
+                    glfwSetWindowShouldClose(window, true);
+                    break;
+                }
+            }
+            eventData = { XR_TYPE_EVENT_DATA_BUFFER };
         }
-        for (auto imageView : swapChainImageViews) {
-            vkDestroyImageView(device, imageView, nullptr);
-        }
-        vkDestroySwapchainKHR(device, swapChain, nullptr);
+    }
+
+    void locateXrViews(const XrFrameState& frameState) {
+        XrViewLocateInfo viewLocateInfo{ XR_TYPE_VIEW_LOCATE_INFO };
+        viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+        viewLocateInfo.displayTime = frameState.predictedDisplayTime;
+        viewLocateInfo.space = xrAppSpace;
+
+        XrViewState viewState{ XR_TYPE_VIEW_STATE };
+        uint32_t viewCount = xrViews.size();
+        xr_check(xrLocateViews(xrSession, &viewLocateInfo, &viewState, viewCount, &viewCount, xrViews.data()), "Failed to locate views");
+    }
+
+    void endXrFrame(const XrFrameState& frameState, bool rendered) {
+        XrCompositionLayerProjection projectionLayer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
+        projectionLayer.space = xrAppSpace;
+        projectionLayer.viewCount = (uint32_t)xrProjectionViews.size();
+        projectionLayer.views = xrProjectionViews.data();
+
+        const XrCompositionLayerBaseHeader* layers[] = {
+            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projectionLayer)
+        };
+
+        XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
+        endInfo.displayTime = frameState.predictedDisplayTime;
+        endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+        endInfo.layerCount = (rendered && xrSessionState == XR_SESSION_STATE_FOCUSED) ? 1 : 0;
+        endInfo.layers = layers;
+
+        xr_check(xrEndFrame(xrSession, &endInfo), "Failed to end XR frame");
     }
 
     void cleanup()
     {
-        cleanupSwapChain();
-
-        // --- OPENXR CLEANUP ---
         for (auto& swapchainData : xrSwapchains) {
             for (auto& fb : swapchainData.framebuffers) vkDestroyFramebuffer(device, fb, nullptr);
             for (auto& viewData : swapchainData.views) vkDestroyImageView(device, viewData.imageView, nullptr);
@@ -417,11 +367,11 @@ private:
         vkDestroyImageView(device, xrDepthImageView, nullptr);
         vkDestroyImage(device, xrDepthImage, nullptr);
         vkFreeMemory(device, xrDepthImageMemory, nullptr);
-        // --- END OPENXR CLEANUP ---
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        vkDestroyRenderPass(device, renderPass, nullptr);
+        vkDestroyRenderPass(device, xrRenderPass, nullptr);
+
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroyBuffer(device, uniformBuffers[i], nullptr);
             vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
@@ -434,7 +384,6 @@ private:
         vkFreeMemory(device, vertexBufferMemory, nullptr);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
         vkDestroyCommandPool(device, commandPool, nullptr);
@@ -446,22 +395,9 @@ private:
         glfwTerminate();
     }
 
-    void recreateSwapChain() {
-        int width = 0, height = 0;
-        glfwGetFramebufferSize(window, &width, &height);
-        while (width == 0 || height == 0) {
-            glfwGetFramebufferSize(window, &width, &height);
-            glfwWaitEvents();
-        }
-        vkDeviceWaitIdle(device);
-        cleanupSwapChain();
-        createSwapChain();
-        createImageViews();
-        createDepthResources();
-        createFramebuffers();
-    }
+    // All mirror-related functions like recreateSwapChain, createSwapChain, createImageViews,
+    // createMirrorRenderPass, createFramebuffers, createDepthResources have been removed.
 
-    // NEW: Initialize OpenXR instance and system
     void initOpenXR() {
         XrApplicationInfo appInfo{};
         strcpy_s(appInfo.applicationName, "Vulkan VR Terrain Renderer");
@@ -483,13 +419,11 @@ private:
         systemGetInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
         xr_check(xrGetSystem(xrInstance, &systemGetInfo, &xrSystemId), "Failed to get OpenXR system");
 
-        // Load function pointers for Vulkan integration
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanInstanceExtensionsKHR", (PFN_xrVoidFunction*)(&xrGetVulkanInstanceExtensionsKHR)), "Failed to get xrGetVulkanInstanceExtensionsKHR");
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanGraphicsDeviceKHR", (PFN_xrVoidFunction*)(&xrGetVulkanGraphicsDeviceKHR)), "Failed to get xrGetVulkanGraphicsDeviceKHR");
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanDeviceExtensionsKHR", (PFN_xrVoidFunction*)(&xrGetVulkanDeviceExtensionsKHR)), "Failed to get xrGetVulkanDeviceExtensionsKHR");
     }
 
-    // MODIFIED: `createInstance` now gets extensions from OpenXR
     void createInstance() {
         if (enableValidationLayers && !checkValidationLayerSupport()) {
             throw std::runtime_error("validation layers requested, but not available!");
@@ -501,11 +435,10 @@ private:
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_1; // Multiview requires 1.1+
+        appInfo.apiVersion = VK_API_VERSION_1_2;
 
         auto glfwExtensions = getRequiredExtensions();
 
-        // Get required instance extensions from OpenXR
         uint32_t xrExtCount = 0;
         xr_check(xrGetVulkanInstanceExtensionsKHR(xrInstance, xrSystemId, 0, &xrExtCount, nullptr), "Failed to get instance ext count");
         std::vector<char> xrExtBuffer(xrExtCount);
@@ -571,7 +504,6 @@ private:
         }
     }
 
-    // REPLACED: `pickPhysicalDevice` must use the device recommended by OpenXR
     void pickPhysicalDevice() {
         VkPhysicalDevice xrProvidedPhysicalDevice = VK_NULL_HANDLE;
         xr_check(xrGetVulkanGraphicsDeviceKHR(xrInstance, xrSystemId, instance, &xrProvidedPhysicalDevice), "Failed to get physical device from OpenXR");
@@ -591,67 +523,94 @@ private:
         std::cout << "Using physical device chosen by OpenXR: " << props.deviceName << std::endl;
     }
 
-    // MODIFIED: `createLogicalDevice` now enables XR extensions and creates the XrSession
     void createLogicalDevice() {
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
-        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
-
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         float queuePriority = 1.0f;
+
         for (uint32_t queueFamily : uniqueQueueFamilies) {
-            VkDeviceQueueCreateInfo queueCreateInfo{};
-            queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            queueCreateInfo.queueFamilyIndex = queueFamily;
-            queueCreateInfo.queueCount = 1;
-            queueCreateInfo.pQueuePriorities = &queuePriority;
-            queueCreateInfos.push_back(queueCreateInfo);
+            VkDeviceQueueCreateInfo queueInfo{};
+            queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueInfo.queueFamilyIndex = queueFamily;
+            queueInfo.queueCount = 1;
+            queueInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueInfo);
         }
+
+        PFN_xrGetVulkanGraphicsRequirementsKHR pfnGetVulkanReqs = nullptr;
+        xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanGraphicsRequirementsKHR",
+            reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanReqs)),
+            "Failed to load xrGetVulkanGraphicsRequirementsKHR");
+
+        XrGraphicsRequirementsVulkanKHR vulkanReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR };
+        xr_check(pfnGetVulkanReqs(xrInstance, xrSystemId, &vulkanReqs),
+            "Failed to get Vulkan graphics requirements");
+
+        std::cout << "[DEBUG] Vulkan runtime requires API version >= "
+            << XR_VERSION_MAJOR(vulkanReqs.minApiVersionSupported) << "."
+            << XR_VERSION_MINOR(vulkanReqs.minApiVersionSupported) << std::endl;
 
         VkPhysicalDeviceMultiviewFeatures multiviewFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES };
         multiviewFeatures.multiview = VK_TRUE;
 
+        VkPhysicalDeviceVulkanMemoryModelFeaturesKHR memoryModelFeatures{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES_KHR
+        };
+        memoryModelFeatures.vulkanMemoryModel = VK_TRUE;
+
+        multiviewFeatures.pNext = &memoryModelFeatures;
+
         VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
         deviceFeatures2.pNext = &multiviewFeatures;
-        vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 
-        VkDeviceCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        createInfo.pNext = &deviceFeatures2;
-        createInfo.pEnabledFeatures = nullptr; // Must be null when pNext is used
-
-        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-        createInfo.pQueueCreateInfos = queueCreateInfos.data();
-
-        // Get required device extensions from OpenXR
         uint32_t xrDevExtCount = 0;
-        xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, 0, &xrDevExtCount, nullptr);
+        xr_check(xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, 0, &xrDevExtCount, nullptr),
+            "Failed to get XR device extension count");
+
         std::vector<char> xrDevExtBuffer(xrDevExtCount);
-        xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, xrDevExtCount, &xrDevExtCount, xrDevExtBuffer.data());
+        xr_check(xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, xrDevExtCount, &xrDevExtCount, xrDevExtBuffer.data()),
+            "Failed to get XR device extensions");
 
         std::string xrExts(xrDevExtBuffer.data());
-        std::vector<std::string> xrDevExtStrings;
         std::stringstream ss(xrExts);
         std::string ext;
-        while (ss >> ext) xrDevExtStrings.push_back(ext);
 
         std::vector<const char*> enabledDeviceExtensions;
-        enabledDeviceExtensions.insert(enabledDeviceExtensions.end(), deviceExtensions.begin(), deviceExtensions.end());
-        for (const auto& s : xrDevExtStrings) {
-            enabledDeviceExtensions.push_back(s.c_str());
+        static std::vector<std::string> persistentXrExtStrings;
+
+        std::cout << "[DEBUG] OpenXR requires the following device extensions:" << std::endl;
+        while (ss >> ext) {
+            std::cout << "\t- " << ext << std::endl;
+            persistentXrExtStrings.push_back(ext);
+            enabledDeviceExtensions.push_back(persistentXrExtStrings.back().c_str());
         }
 
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
-        createInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
-
-        if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create logical device!");
+        std::cout << "[DEBUG] Application requires the following device extensions:" << std::endl;
+        for (const auto& appExt : deviceExtensions) {
+            enabledDeviceExtensions.push_back(appExt);
         }
+
+        VkDeviceCreateInfo deviceCreateInfo{};
+        deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        deviceCreateInfo.pNext = &deviceFeatures2;
+        deviceCreateInfo.pEnabledFeatures = nullptr;
+        deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+        deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+        deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
+        deviceCreateInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
+        deviceCreateInfo.enabledLayerCount = enableValidationLayers ? static_cast<uint32_t>(validationLayers.size()) : 0;
+        deviceCreateInfo.ppEnabledLayerNames = enableValidationLayers ? validationLayers.data() : nullptr;
+
+        if (vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create Vulkan logical device!");
+        }
+        std::cout << "[INFO] Successfully created VkDevice." << std::endl;
 
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
 
-        // --- Create OpenXR Session ---
         XrGraphicsBindingVulkanKHR graphicsBinding{ XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR };
         graphicsBinding.instance = instance;
         graphicsBinding.physicalDevice = physicalDevice;
@@ -662,80 +621,25 @@ private:
         XrSessionCreateInfo sessionCreateInfo{ XR_TYPE_SESSION_CREATE_INFO };
         sessionCreateInfo.next = &graphicsBinding;
         sessionCreateInfo.systemId = xrSystemId;
-        xr_check(xrCreateSession(xrInstance, &sessionCreateInfo, &xrSession), "Failed to create OpenXR session");
 
-        // --- Create reference space ---
+        std::cout << "[INFO] Attempting to create XrSession..." << std::endl;
+        xr_check(xrCreateSession(xrInstance, &sessionCreateInfo, &xrSession), "Failed to create OpenXR session");
+        std::cout << "[INFO] Successfully created XrSession." << std::endl;
+
         XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
         spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
         spaceCreateInfo.poseInReferenceSpace = { {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f} };
-        xr_check(xrCreateReferenceSpace(xrSession, &spaceCreateInfo, &xrAppSpace), "Failed to create OpenXR app space");
+        xr_check(xrCreateReferenceSpace(xrSession, &spaceCreateInfo, &xrAppSpace),
+            "Failed to create OpenXR app space");
     }
 
-    void createSwapChain() { // This is for the desktop mirror view
-        SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
-        VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
-        VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
-        VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
-
-        uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
-        if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
-            imageCount = swapChainSupport.capabilities.maxImageCount;
-        }
-
-        VkSwapchainCreateInfoKHR createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        createInfo.surface = surface;
-        createInfo.minImageCount = imageCount;
-        createInfo.imageFormat = surfaceFormat.format;
-        createInfo.imageColorSpace = surfaceFormat.colorSpace;
-        createInfo.imageExtent = extent;
-        createInfo.imageArrayLayers = 1; // Mirror view is mono
-        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
-        uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
-
-        if (indices.graphicsFamily != indices.presentFamily) {
-            createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-            createInfo.queueFamilyIndexCount = 2;
-            createInfo.pQueueFamilyIndices = queueFamilyIndices;
-        }
-        else {
-            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        }
-
-        createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
-        createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        createInfo.presentMode = presentMode;
-        createInfo.clipped = VK_TRUE;
-
-        if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create swap chain!");
-        }
-
-        vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr);
-        swapChainImages.resize(imageCount);
-        vkGetSwapchainImagesKHR(device, swapChain, &imageCount, swapChainImages.data());
-
-        swapChainImageFormat = surfaceFormat.format;
-        swapChainExtent = extent;
-    }
-
-    void createImageViews() { // For desktop mirror view
-        swapChainImageViews.resize(swapChainImages.size());
-        for (uint32_t i = 0; i < swapChainImages.size(); i++) {
-            swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-        }
-    }
-
-    // NEW: Create OpenXR swapchains for VR rendering
     void createXrSwapchains() {
         uint32_t formatCount = 0;
         xr_check(xrEnumerateSwapchainFormats(xrSession, 0, &formatCount, nullptr), "Failed to get swapchain format count");
         std::vector<int64_t> formats(formatCount);
         xr_check(xrEnumerateSwapchainFormats(xrSession, formatCount, &formatCount, formats.data()), "Failed to enumerate swapchain formats");
 
-        xrColorFormat = formats[0]; // Default
+        xrColorFormat = formats[0];
         for (auto& format : formats) {
             if (format == VK_FORMAT_R8G8B8A8_SRGB) {
                 xrColorFormat = format;
@@ -788,24 +692,23 @@ private:
         }
     }
 
-    // NEW: Create Framebuffers for the VR swapchains
     void createXrFramebuffers() {
         for (auto& swapchain : xrSwapchains) {
             swapchain.framebuffers.resize(swapchain.views.size());
             for (size_t i = 0; i < swapchain.views.size(); i++) {
                 std::array<VkImageView, 2> attachments = {
                     swapchain.views[i].imageView,
-                    xrDepthImageView // Use the correctly-sized VR depth buffer
+                    xrDepthImageView
                 };
 
                 VkFramebufferCreateInfo framebufferInfo{};
                 framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-                framebufferInfo.renderPass = renderPass;
+                framebufferInfo.renderPass = xrRenderPass;
                 framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
                 framebufferInfo.pAttachments = attachments.data();
                 framebufferInfo.width = swapchain.width;
                 framebufferInfo.height = swapchain.height;
-                framebufferInfo.layers = 1; // Each VR framebuffer is for a single image (not an array)
+                framebufferInfo.layers = 1;
 
                 if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapchain.framebuffers[i]) != VK_SUCCESS) {
                     throw std::runtime_error("failed to create XR framebuffer!");
@@ -814,17 +717,16 @@ private:
         }
     }
 
-    // MODIFIED: `createRenderPass` must use the VR swapchain format and enable multiview
-    void createRenderPass() {
+    void createXrRenderPass() {
         VkAttachmentDescription colorAttachment{};
-        colorAttachment.format = (VkFormat)xrColorFormat; // Use VR format
+        colorAttachment.format = (VkFormat)xrColorFormat;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // Good for XR
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentDescription depthAttachment{};
         depthAttachment.format = findDepthFormat();
@@ -858,14 +760,13 @@ private:
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-        // Enable multiview for the render pass
-        const uint32_t viewMask = 0b00000011; // 0b11 means enable view 0 and view 1
+        const uint32_t viewMask = 0b00000011;
 
         VkRenderPassMultiviewCreateInfo multiviewCreateInfo{};
         multiviewCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
         multiviewCreateInfo.subpassCount = 1;
         multiviewCreateInfo.pViewMasks = &viewMask;
-        multiviewCreateInfo.correlationMaskCount = 0; // Not needed
+        multiviewCreateInfo.correlationMaskCount = 0;
         multiviewCreateInfo.pCorrelationMasks = nullptr;
 
         std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
@@ -879,8 +780,8 @@ private:
         renderPassInfo.dependencyCount = 1;
         renderPassInfo.pDependencies = &dependency;
 
-        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create render pass!");
+        if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &xrRenderPass) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create xr render pass!");
         }
     }
 
@@ -1005,7 +906,7 @@ private:
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = pipelineLayout;
-        pipelineInfo.renderPass = renderPass;
+        pipelineInfo.renderPass = xrRenderPass;
         pipelineInfo.subpass = 0;
         pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
@@ -1015,29 +916,6 @@ private:
 
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
-    }
-
-    void createFramebuffers() { // For desktop mirror
-        swapChainFramebuffers.resize(swapChainImageViews.size());
-        for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-            std::array<VkImageView, 2> attachments = {
-                swapChainImageViews[i],
-                depthImageView
-            };
-
-            VkFramebufferCreateInfo framebufferInfo{};
-            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferInfo.renderPass = renderPass; // Note: This might cause issues if not compatible
-            framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-            framebufferInfo.pAttachments = attachments.data();
-            framebufferInfo.width = swapChainExtent.width;
-            framebufferInfo.height = swapChainExtent.height;
-            framebufferInfo.layers = 1;
-
-            if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create framebuffer!");
-            }
-        }
     }
 
     void createCommandPool() {
@@ -1051,13 +929,6 @@ private:
         }
     }
 
-    void createDepthResources() { // For desktop mirror
-        VkFormat depthFormat = findDepthFormat();
-        createImage(swapChainExtent.width, swapChainExtent.height, 1, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-        depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-    }
-
-    // NEW: Create depth resources sized for the VR view
     void createXrDepthResources() {
         uint32_t vrWidth = 0, vrHeight = 0;
         for (const auto& sc : xrSwapchains) {
@@ -1066,14 +937,14 @@ private:
         }
 
         if (vrWidth == 0 || vrHeight == 0) {
-            throw std::runtime_error("VR swapchain dimensions are zero.");
+            vrWidth = 1024;
+            vrHeight = 1024;
         }
 
         VkFormat depthFormat = findDepthFormat();
         createImage(vrWidth, vrHeight, 1, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, xrDepthImage, xrDepthImageMemory);
         xrDepthImageView = createImageView(xrDepthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
     }
-
 
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
         for (VkFormat format : candidates) {
@@ -1349,24 +1220,20 @@ private:
         }
     }
 
-    // NEW: Command buffer recording for a single eye in a VR frame
-    void recordCommandBufferXR(VkCommandBuffer commandBuffer, uint32_t eyeIndex, uint32_t swapchainImageIndex) {
+    void recordCommandBufferXR(VkCommandBuffer commandBuffer, uint32_t swapchainImageIndex) {
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = renderPass;
-        renderPassInfo.framebuffer = xrSwapchains[eyeIndex].framebuffers[swapchainImageIndex];
+        renderPassInfo.renderPass = xrRenderPass;
+        renderPassInfo.framebuffer = xrSwapchains[0].framebuffers[swapchainImageIndex];
         renderPassInfo.renderArea.offset = { 0, 0 };
-        renderPassInfo.renderArea.extent = { xrSwapchains[eyeIndex].width, xrSwapchains[eyeIndex].height };
+        renderPassInfo.renderArea.extent = { xrSwapchains[0].width, xrSwapchains[0].height };
 
         std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
+        clearValues[0].color = { {0.2f, 0.2f, 0.2f, 1.0f} };
         clearValues[1].depthStencil = { 1.0f, 0 };
         renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
         renderPassInfo.pClearValues = clearValues.data();
 
-        // The render pass is started once, but thanks to multiview, it will render to both eyes.
-        // We only need to record the commands for one eye's "view" of the scene.
-        // The vertex shader with gl_ViewIndex will handle selecting the correct matrices.
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
@@ -1374,15 +1241,15 @@ private:
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
-        viewport.width = (float)xrSwapchains[eyeIndex].width;
-        viewport.height = (float)xrSwapchains[eyeIndex].height;
+        viewport.width = (float)xrSwapchains[0].width;
+        viewport.height = (float)xrSwapchains[0].height;
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
         VkRect2D scissor{};
         scissor.offset = { 0, 0 };
-        scissor.extent = { xrSwapchains[eyeIndex].width, xrSwapchains[eyeIndex].height };
+        scissor.extent = { xrSwapchains[0].width, xrSwapchains[0].height };
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
         VkBuffer vertexBuffers[] = { vertexBuffer };
@@ -1397,7 +1264,6 @@ private:
     }
 
     void createSyncObjects() {
-        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
@@ -1409,30 +1275,26 @@ private:
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
-                vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
                 throw std::runtime_error("failed to create synchronization objects for a frame!");
             }
         }
     }
 
-    // NEW: Update UBO with data from OpenXR
     void updateUniformBufferXR() {
         UniformBufferObject ubo{};
-        ubo.model = glm::mat4(1.0f); // Or apply any model transformations here
+        ubo.model = glm::mat4(1.0f);
 
         for (uint32_t i = 0; i < xrViews.size(); ++i) {
-            // VIEW MATRIX from OpenXR pose
             const auto& pose = xrViews[i].pose;
             glm::quat orientation(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
             glm::vec3 position(pose.position.x, pose.position.y, pose.position.z);
             glm::mat4 viewMatrix = glm::inverse(glm::translate(glm::mat4(1.0f), position) * glm::mat4_cast(orientation));
 
-            // PROJECTION MATRIX from OpenXR fov
             const auto& fov = xrViews[i].fov;
             float nearZ = 0.1f;
-            float farZ = 1000.0f; // Adjust as needed
+            float farZ = 1000.0f;
 
             float tanLeft = tanf(fov.angleLeft);
             float tanRight = tanf(fov.angleRight);
@@ -1449,7 +1311,7 @@ private:
             projMatrix[2][2] = -farZ / (farZ - nearZ);
             projMatrix[2][3] = -1.0f;
             projMatrix[3][2] = -(farZ * nearZ) / (farZ - nearZ);
-            projMatrix[1][1] *= -1; // Vulkan Y-flip for clip space
+            projMatrix[1][1] *= -1;
 
             ubo.view[i] = viewMatrix;
             ubo.proj[i] = projMatrix;
@@ -1459,7 +1321,6 @@ private:
         memcpy(uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
     }
 
-    // NEW: Main VR drawing function
     void drawXRFrame()
     {
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
@@ -1474,7 +1335,6 @@ private:
 
         std::vector<uint32_t> imageIndices(xrViews.size());
 
-        // This loop only handles acquiring images. Drawing is done once for all views.
         for (uint32_t i = 0; i < xrViews.size(); ++i) {
             auto& swapchain = xrSwapchains[i];
             XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
@@ -1487,16 +1347,23 @@ private:
 
         updateUniformBufferXR();
 
-        // Record draw calls. Since we use multiview, we can do this in a single render pass.
-        // We'll just use the framebuffer from the first eye's swapchain. The render pass view mask ensures it goes to both.
-        recordCommandBufferXR(commandBuffer, 0, imageIndices[0]);
+        recordCommandBufferXR(commandBuffer, imageIndices[0]);
 
         VK_CHECK(vkEndCommandBuffer(commandBuffer), "failed to record command buffer!");
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pWaitDstStageMask = nullptr;
+
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
+
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores;
 
         VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]), "Failed to submit draw command buffer for XR!");
 
@@ -1505,7 +1372,6 @@ private:
             XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
             xr_check(xrReleaseSwapchainImage(swapchain.swapchain, &releaseInfo), "Failed to release swapchain image");
 
-            // Update projection view for the compositor
             xrProjectionViews[i].pose = xrViews[i].pose;
             xrProjectionViews[i].fov = xrViews[i].fov;
             xrProjectionViews[i].subImage.swapchain = swapchain.swapchain;
@@ -1529,38 +1395,6 @@ private:
         return shaderModule;
     }
 
-    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-        for (const auto& availableFormat : availableFormats) {
-            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                return availableFormat;
-            }
-        }
-        return availableFormats[0];
-    }
-
-    VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-        for (const auto& availablePresentMode : availablePresentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-                return availablePresentMode;
-            }
-        }
-        return VK_PRESENT_MODE_FIFO_KHR;
-    }
-
-    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
-        if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
-            return capabilities.currentExtent;
-        }
-        else {
-            int width, height;
-            glfwGetFramebufferSize(window, &width, &height);
-            VkExtent2D actualExtent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
-            actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-            actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-            return actualExtent;
-        }
-    }
-
     SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
         SwapChainSupportDetails details;
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
@@ -1582,13 +1416,13 @@ private:
     bool isDeviceSuitable(VkPhysicalDevice device) {
         QueueFamilyIndices indices = findQueueFamilies(device);
         bool extensionsSupported = checkDeviceExtensionSupport(device);
+
         bool swapChainAdequate = false;
         if (extensionsSupported) {
             SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
 
-        // Check for multiview support
         VkPhysicalDeviceMultiviewFeatures multiviewFeatures{};
         multiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
         VkPhysicalDeviceFeatures2 deviceFeatures2{};
