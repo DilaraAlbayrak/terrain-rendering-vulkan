@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{88645127-9ff0-4ea2-b2ed-2e2b67922a18}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="$(OpenXRLoaderBinaryRoot)\bin\openxr_loader.dll" />
+    <None Include="shaders\multipass.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\multipass_tess.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\multipass_tess.tesc">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\multipass_tess.tese">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\multipass_tess.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\shader.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\shader.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\singlepass.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\singlepass.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\tess.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\tess.tesc">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\tess.tese">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\tess.vert">
+      <Filter>Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="TerrainRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_multipass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_singlepass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_stereoVR.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_tessellated_stereo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_tessellation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainRenderer_VR_notess.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="shaders\multipass.frag">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+  </ItemGroup>
+</Project>
