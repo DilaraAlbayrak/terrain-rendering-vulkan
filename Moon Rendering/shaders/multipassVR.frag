@@ -8,7 +8,11 @@ layout(location = 0) out vec4 outColor;
 
 void main() {
     vec3 normal = normalize(fragNormal);
-    vec3 lightDir = normalize(vec3(0.0, 4.0, 0.0));
+
+    // The light source is now low on the horizon (Y component is small).
+    // This will create long, dramatic shadows and highlight surface details.
+    vec3 lightDir = normalize(vec3(1.0, 0.2, 1.0));
+
     vec3 viewDir = normalize(fragViewDir);
     vec3 reflectDir = reflect(-lightDir, normal);
 
@@ -17,11 +21,11 @@ void main() {
 
     vec3 ambient = vec3(0.05);
     vec3 diffuse = diff * vec3(0.25);
-    vec3 specular = spec * vec3(0.4);
+    vec3 specular = spec * vec3(1.4);
 
     vec3 finalColour = ambient + diffuse + specular;
 
     outColor = vec4(finalColour, 1.0);
-    //outColor = vec4(1.0, 0.0, 0.0, 1.0); // Debug: output red color
-    //outColor = vec4(normal, 1.0); // Debug: output normal as color
+    //outColor = vec4(normal, 1.0);
+    //outColor = vec4(1.0, 0.0, 0.0, 1.0);
 }

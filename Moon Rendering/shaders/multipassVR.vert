@@ -21,10 +21,15 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
     vec4 worldPosition = ubo.model * vec4(inPosition, 1.0);
-
-    gl_Position = ubo.proj[pushConstants.viewIndex] * ubo.view[pushConstants.viewIndex] * worldPosition;
     fragPosition = worldPosition.xyz;
-    fragNormal = normalize(transpose(inverse(mat3(ubo.model))) * inNormal);
 
-    fragViewDir = ubo.cameraPosition[pushConstants.viewIndex].xyz - worldPosition.xyz;
+    // world-space normal
+    mat3 normalMatrix = transpose(inverse(mat3(ubo.model)));
+    fragNormal = normalize(normalMatrix * inNormal);
+
+    // Camera view direction in world space
+    fragViewDir = normalize(ubo.cameraPosition[pushConstants.viewIndex].xyz - worldPosition.xyz);
+
+    // clip-space position
+    gl_Position = ubo.proj[pushConstants.viewIndex] * ubo.view[pushConstants.viewIndex] * worldPosition;
 }
