@@ -13,12 +13,6 @@
 
 #include <glm/gtx/quaternion.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
-#define STB_EASY_FONT_IMPLEMENTATION
-#include <stb_easy_font.h>
-
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
@@ -71,7 +65,6 @@ inline void xr_check(XrResult result, const std::string& message)
         throw std::runtime_error(message + " (XR Result: " + std::to_string(result) + ")");
     }
 }
-
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
     auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
@@ -224,12 +217,6 @@ private:
     VkDeviceMemory xrDepthImageMemory;
     VkImageView xrDepthImageView;
 
-    // Textures not used but infrastructure can remain
-    VkImage textureImage;
-    VkDeviceMemory textureImageMemory;
-    VkImageView textureImageView;
-    VkSampler textureSampler;
-
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     VkBuffer vertexBuffer;
@@ -253,7 +240,7 @@ private:
 
     bool framebufferResized = false;
 
-    glm::vec3 playerPosition = glm::vec3(0.0f, 20.0f, 0.0f); // Starting position in a Y-up system
+    glm::vec3 playerPosition = glm::vec3(0.0f, 20.0f, 0.0f); // starting position in a Y-up system
     glm::quat currentHmdOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
     XrInstance xrInstance = XR_NULL_HANDLE;
@@ -286,7 +273,7 @@ private:
     }
 
     void initVulkan() {
-        // Initialize OpenXR first
+        // initialize OpenXR first
         initOpenXR();
         createInstance();
         setupDebugMessenger();
@@ -296,15 +283,15 @@ private:
 
         createCommandPool();
         createXrSwapchains();
-        createSwapChain(); // For desktop mirror
-        createImageViews(); // For desktop mirror
+        createSwapChain(); // for desktop mirror
+        createImageViews(); // for desktop mirror
         createRenderPass();
         createXrDepthResources();
         createXrFramebuffers();
         createDescriptorSetLayout();
         createGraphicsPipeline();
-        createDepthResources(); // For desktop mirror
-        createFramebuffers(); // For desktop mirror
+        createDepthResources(); // for desktop mirror
+        createFramebuffers(); // for desktop mirror
 
         loadModel();
         createVertexBuffer();
@@ -331,13 +318,17 @@ private:
 
                 if (result == XR_ERROR_SESSION_LOST) {
                     std::cout << "[INFO] OpenXR session is lost. Shutting down gracefully." << std::endl;
-                    glfwSetWindowShouldClose(window, true); // Signal the loop to exit
-                    continue; // Skip the rest of the frame logic
+                    glfwSetWindowShouldClose(window, true); // signal the loop to exit
+                    continue; // fkip the rest of the frame logic
                 }
-                // For any other non-success error, we can still treat it as fatal
+				else if (result == XR_SESSION_NOT_FOCUSED) {
+					// session is not focused, we won't render this frame but still need to call xrBeginFrame and xrEndFrame
+					//std::cout << "[INFO] OpenXR session is not focused." << std::endl;
+				}
+                // for any other non-success error, treat it as fatal
                 xr_check(result, "Failed to wait for XR frame with an unexpected error");
 
-                // From this point on, we know the session is valid for this frame
+                // from this point on the session is valid for this frame
                 xr_check(xrBeginFrame(xrSession, nullptr), "Failed to begin XR frame");
 
                 if (frameState.shouldRender) {
@@ -347,7 +338,7 @@ private:
 
                 endXrFrame(frameState);
 
-                // Render mirror view to desktop window
+                // render mirror view to desktop window
                 drawFrame();
             }
             else {
@@ -364,7 +355,7 @@ private:
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastTime).count();
         lastTime = currentTime;
 
-        // Head-Directed Movement in a "Y-is-Up" World
+		// determine forward and right vectors from HMD orientation
         glm::vec3 baseForward = glm::vec3(0.0f, 0.0f, -1.0f);
         glm::vec3 forwardVector = currentHmdOrientation * baseForward;
 
@@ -416,12 +407,12 @@ private:
                 }
                 case XR_SESSION_STATE_LOSS_PENDING: {
                     std::cout << "[INFO] OpenXR session loss is pending. Requesting exit." << std::endl;
-                    xrRequestExitSession(xrSession); // Tell the runtime we are ready to exit
+                    xrRequestExitSession(xrSession); // ready to exit
                     break;
                 }
                 case XR_SESSION_STATE_EXITING: {
                     std::cout << "[INFO] OpenXR session is exiting. Shutting down." << std::endl;
-                    glfwSetWindowShouldClose(window, true); // Now, actually close the window
+                    glfwSetWindowShouldClose(window, true); // close the window
                     break;
                 }
                 }
@@ -549,7 +540,7 @@ private:
 
     void initOpenXR() {
         XrApplicationInfo appInfo{};
-        strcpy_s(appInfo.applicationName, "Vulkan VR Model Viewer");
+        strcpy_s(appInfo.applicationName, "Vulkan VR Moon Renderer");
         appInfo.applicationVersion = 1;
         strcpy_s(appInfo.engineName, "Custom Engine");
         appInfo.engineVersion = 1;
@@ -690,7 +681,7 @@ private:
             queueCreateInfos.push_back(queueInfo);
         }
 
-        // Get Vulkan Graphics Requirements from OpenXR
+        // get vulkan graphics requirements from OpenXR
         PFN_xrGetVulkanGraphicsRequirementsKHR pfnGetVulkanReqs = nullptr;
         xr_check(xrGetInstanceProcAddr(xrInstance, "xrGetVulkanGraphicsRequirementsKHR",
             reinterpret_cast<PFN_xrVoidFunction*>(&pfnGetVulkanReqs)),
@@ -699,22 +690,22 @@ private:
         XrGraphicsRequirementsVulkanKHR vulkanReqs{ XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR };
         xr_check(pfnGetVulkanReqs(xrInstance, xrSystemId, &vulkanReqs), "Failed to get Vulkan graphics requirements");
 
-        // Correctly chain the features required by OpenXR and the application
+        // correctly chain the features required by OpenXR and the application
         VkPhysicalDeviceFeatures2 deviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 
-        // App-specific features
+        // app-specific features
         VkPhysicalDeviceFeatures appFeatures{};
         appFeatures.samplerAnisotropy = VK_TRUE;
         appFeatures.tessellationShader = VK_TRUE;
-        //appFeatures.fillModeNonSolid = VK_TRUE; // Uncomment if wireframe mode is needed
+        //appFeatures.fillModeNonSolid = VK_TRUE; // uncomment if wireframe mode is needed
         deviceFeatures2.features = appFeatures;
 
-        // OpenXR-required features (Multiview is often required for composition)
+        // OpenXR-required features, multiview feature
         VkPhysicalDeviceMultiviewFeatures multiviewFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES };
         multiviewFeatures.multiview = VK_TRUE;
         deviceFeatures2.pNext = &multiviewFeatures;
 
-        // Get and enable required device extensions from OpenXR
+        // get and enable required device extensions from OpenXR
         uint32_t xrDevExtCount = 0;
         xr_check(xrGetVulkanDeviceExtensionsKHR(xrInstance, xrSystemId, 0, &xrDevExtCount, nullptr), "Failed to get XR device extension count");
         std::vector<char> xrDevExtBuffer(xrDevExtCount);
@@ -735,11 +726,11 @@ private:
             enabledDeviceExtensions.push_back(appExt);
         }
 
-        // Create the logical device with the correct feature chain
+        // create the logical device with the correct feature chain
         VkDeviceCreateInfo deviceCreateInfo{};
         deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        deviceCreateInfo.pNext = &deviceFeatures2; // Point to the head of the feature chain
-        deviceCreateInfo.pEnabledFeatures = nullptr; // Must be null when pNext is a VkPhysicalDeviceFeatures2 struct
+        deviceCreateInfo.pNext = &deviceFeatures2; // point to the head of the feature chain
+        deviceCreateInfo.pEnabledFeatures = nullptr; // must be null when pNext is a VkPhysicalDeviceFeatures2 struct
         deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
         deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
@@ -755,8 +746,8 @@ private:
         vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
         vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
 
-        // Create OpenXR Session
-        // This should now succeed because the device was created with the required features.
+        // create OpenXR Session
+        // this should now succeed because the device was created with the required features
         XrGraphicsBindingVulkanKHR graphicsBinding{ XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR };
         graphicsBinding.instance = instance;
         graphicsBinding.physicalDevice = physicalDevice;
@@ -772,7 +763,7 @@ private:
         xr_check(xrCreateSession(xrInstance, &sessionCreateInfo, &xrSession), "Failed to create OpenXR session");
         std::cout << "[INFO] Successfully created XrSession." << std::endl;
 
-        // Create reference space
+        // create reference space
         XrReferenceSpaceCreateInfo spaceCreateInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
         spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
         spaceCreateInfo.poseInReferenceSpace = { {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f} };
@@ -1154,7 +1145,7 @@ private:
             vrHeight = xrSwapchains[0].height;
         }
         else {
-            vrWidth = 1024; vrHeight = 1024; // Fallback
+            vrWidth = 1024; vrHeight = 1024; 
         }
 
         VkFormat depthFormat = findDepthFormat();
@@ -1193,12 +1184,6 @@ private:
     bool hasStencilComponent(VkFormat format) {
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
-
-    void createTextureImage() {
-        // This function is kept for completeness but is not used in the multiview example
-    }
-    void createTextureImageView() {}
-    void createTextureSampler() {}
 
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
         VkImageViewCreateInfo viewInfo{};
@@ -1258,7 +1243,7 @@ private:
 
         std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
-        // This model is Z-up, we rotate it to be Y-up to match VR conventions
+        // this model is Z-up, we rotate it to be Y-up to match VR conventions
         glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
         for (const auto& shape : shapes) {
@@ -1540,7 +1525,7 @@ private:
         vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        // Render left eye to left half
+		// render left eye to left half
         {
             VkViewport viewport{ 0.0f, 0.0f, (float)swapChainExtent.width / 2.0f, (float)swapChainExtent.height, 0.0f, 1.0f };
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
@@ -1551,7 +1536,7 @@ private:
             vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
         }
 
-        // Render right eye to right half
+        // render right eye to right half
         {
             VkViewport viewport{ (float)swapChainExtent.width / 2.0f, 0.0f, (float)swapChainExtent.width / 2.0f, (float)swapChainExtent.height, 0.0f, 1.0f };
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport);

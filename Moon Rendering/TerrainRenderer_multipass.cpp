@@ -8,12 +8,6 @@
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
-#define STB_EASY_FONT_IMPLEMENTATION
-#include <stb_easy_font.h>
-
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
@@ -91,10 +85,6 @@ struct SwapChainSupportDetails {
 struct BoundingBox {
     glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
     glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
-
-    // apollo11 bb info
-    // Min Coords : vec3(-2100.000000, -13965.000000, -196.031570)
-    // Max Coords : vec3(2100.000000, 13965.000000, 196.031570)
 };
 
 struct Vertex {
@@ -169,7 +159,7 @@ namespace std {
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
-    alignas(16) glm::mat4 view[2];
+	alignas(16) glm::mat4 view[2]; // one for left eye, one for right eye
     alignas(16) glm::mat4 proj[2];
     alignas(16) glm::vec4 cameraPosition[2];
 };
@@ -253,8 +243,8 @@ private:
     bool framebufferResized = false;
 
     // for logging
-    int numFrames = 0;  // for debugging
-    int routeCount = 0; // for debugging
+    int numFrames = 0;  
+    int routeCount = 0; 
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
@@ -274,10 +264,9 @@ private:
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 
         glfwSetKeyCallback(window, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
-            // Retrieve the application instance inside the lambda
+            // retrieve the application instance inside the lambda
             auto app = reinterpret_cast<TerrainRenderer*>(glfwGetWindowUserPointer(win));
 
-            // The same toggle logic as before
             if (key == GLFW_KEY_SPACE && action == GLFW_PRESS) {
                 if (app->cameraSpeed > 0.0f) {
                     app->cameraSpeed = 0.0f;
@@ -776,7 +765,7 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
+        //rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
@@ -820,18 +809,18 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
-        // Define the push constant range (for multipass)
+        // define the push constant range (for multipass)
         VkPushConstantRange pushConstantRange{};
-        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // It will be used in the vertex shader
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // used in the vertex shader
         pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(int); // We are pushing a single integer (viewIndex)
+        pushConstantRange.size = sizeof(int); // pushing a single integer, viewIndex
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
-        pipelineLayoutInfo.pushConstantRangeCount = 1; // Specify we are using one push constant range
-        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange; // Point to our range
+        pipelineLayoutInfo.pushConstantRangeCount = 1; 
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange; 
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
@@ -1371,7 +1360,7 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // Bind pipeline and buffers once for both eyes
+        // bind pipeline and buffers once for both eyes
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
         VkBuffer vertexBuffers[] = { vertexBuffer };
         VkDeviceSize offsets[] = { 0 };
@@ -1379,12 +1368,12 @@ private:
         vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        // --- RENDER LEFT EYE ---
+        // for rendering left eye
         {
             VkViewport viewport{};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
-            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
+            viewport.width = (float)swapChainExtent.width / 2.0f; // half width
             viewport.height = (float)swapChainExtent.height;
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
@@ -1395,7 +1384,7 @@ private:
             scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-            // Push the view index for the left eye (0)
+            // push the view index for the left eye
             int viewIndex = 0;
             vkCmdPushConstants(
                 commandBuffer,
@@ -1408,12 +1397,12 @@ private:
             vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
         }
 
-        // --- RENDER RIGHT EYE ---
+		// for rendering right eye
         {
             VkViewport viewport{};
-            viewport.x = (float)swapChainExtent.width / 2.0f; // Start at the middle
+            viewport.x = (float)swapChainExtent.width / 2.0f; // start at the middle
             viewport.y = 0.0f;
-            viewport.width = (float)swapChainExtent.width / 2.0f; // Half width
+            viewport.width = (float)swapChainExtent.width / 2.0f; // half width
             viewport.height = (float)swapChainExtent.height;
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
@@ -1424,7 +1413,7 @@ private:
             scissor.extent = { swapChainExtent.width / 2, swapChainExtent.height };
             vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-            // Push the view index for the right eye (1)
+            // push the view index for the right eye
             int viewIndex = 1;
             vkCmdPushConstants(
                 commandBuffer,
@@ -1511,13 +1500,13 @@ private:
         ubo.model = glm::mat4(1.0f);
 
         // stereo parameters
-        float ipd = 0.064f * 1.0f; // Interpupillary distance, sometimes deliberately exaggerated
+        float ipd = 0.064f * 1.0f; // interpupillary distance
         float centre = ipd * 0.5f;
 
         constexpr float fov = glm::radians(30.0f);
         float aspect = swapChainExtent.width * 0.5f / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
-        float farPlane = 4000.0f; // Increased from 1000.0f
+        float farPlane = 4000.0f; // increased from 1000.0f
         glm::vec3 rightDir = glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f)));
         //glm::vec3 rightDir = movingForward ? glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f))) : glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, -1.0f)));
 
@@ -1547,7 +1536,7 @@ private:
         ubo.proj[1][1][1] *= -1;
         ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
 
-        // Copy the data to the uniform buffer.
+        // copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1707,7 +1696,6 @@ private:
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-        // Ensure the device supports wireframe rendering (non-solid fill mode).
         //return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.fillModeNonSolid;
         return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
     }
@@ -1805,7 +1793,7 @@ private:
         std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
         std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
 
-        // Generate a single timestamp for all files.
+        // generate a single timestamp for all files.
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
         std::tm time_info;

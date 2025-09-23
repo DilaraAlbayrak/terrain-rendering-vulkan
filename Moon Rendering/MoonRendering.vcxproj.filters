@@ -83,7 +83,9 @@
     <CustomBuild Include="shaders\multipassVR.vert">
       <Filter>Shaders</Filter>
     </CustomBuild>
-    <CustomBuild Include="shaders\multipassVR.frag" />
+    <CustomBuild Include="shaders\multipassVR.frag">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config">

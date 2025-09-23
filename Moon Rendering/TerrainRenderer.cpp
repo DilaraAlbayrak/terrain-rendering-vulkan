@@ -8,12 +8,6 @@
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
-#define STB_EASY_FONT_IMPLEMENTATION
-#include <stb_easy_font.h>
-
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
@@ -92,10 +86,6 @@ struct SwapChainSupportDetails {
 struct BoundingBox {
     glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
     glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
-
-    // apollo11 bb info
-    // Min Coords : vec3(-2100.000000, -13965.000000, -196.031570)
-    // Max Coords : vec3(2100.000000, 13965.000000, 196.031570)
 };
 
 struct Vertex {
@@ -254,8 +244,8 @@ private:
     bool framebufferResized = false;
 
     // for logging
-    int numFrames = 0;  // for debugging
-    int routeCount = 0; // for debugging
+    int numFrames = 0;  
+    int routeCount = 0; 
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
@@ -1328,13 +1318,12 @@ private:
             throw std::runtime_error("failed to begin recording command buffer!");
         }
 
-        // --- GPU Timing Start ---
-        // 1. Reset the query pool for the current frame's queries.
+        // GPU timing
+        // reset the query pool for the current frame's queries
         vkCmdResetQueryPool(commandBuffer, queryPool, currentFrame * 2, 2);
 
-        // 2. Write the starting timestamp before any rendering work.
+        // write the starting timestamp before any rendering work
         vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, currentFrame * 2);
-        // -------------------------
 
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1352,7 +1341,6 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // --- All your drawing commands that you want to measure ---
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
         VkViewport viewport{};
@@ -1378,14 +1366,11 @@ private:
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-        // --- End of drawing commands ---
 
         vkCmdEndRenderPass(commandBuffer);
 
-        // --- GPU Timing End ---
-        // 3. Write the ending timestamp after all rendering work is complete.
+        // write the ending timestamp after all rendering work is complete
         vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currentFrame * 2 + 1);
-        // -----------------------
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
@@ -1466,13 +1451,12 @@ private:
         float farPlane = 4000.0f; // Increased from 1000.0f
         ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
 
-        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
+        // this correction is for Vulkan's inverted Y-axis in its clip space
         ubo.proj[1][1] *= -1;
 
-        // Pass the camera's world position to the shader (useful for lighting calculations).
+        // pass the camera's world position to the shader for lighting calculations
         ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
 
-        // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1727,7 +1711,7 @@ private:
         std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
         std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
 
-        // Generate a single timestamp for all files.
+        // generate a single timestamp for all files.
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
         std::tm time_info;

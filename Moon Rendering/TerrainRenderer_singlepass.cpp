@@ -8,12 +8,6 @@
 #include <glm/gtx/hash.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
-#define STB_EASY_FONT_IMPLEMENTATION
-#include <stb_easy_font.h>
-
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
@@ -92,10 +86,6 @@ struct SwapChainSupportDetails {
 struct BoundingBox {
     glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
     glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
-
-    // apollo11 bb info
-    // Min Coords : vec3(-2100.000000, -13965.000000, -196.031570)
-    // Max Coords : vec3(2100.000000, 13965.000000, 196.031570)
 };
 
 struct Vertex {
@@ -254,8 +244,8 @@ private:
     bool framebufferResized = false;
 
     // for logging
-    int numFrames = 0;  // for debugging
-    int routeCount = 0; // for debugging
+    int numFrames = 0;  
+    int routeCount = 0; 
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
@@ -294,9 +284,6 @@ private:
         createCommandPool();
         createDepthResources();
         createFramebuffers();
-        //createTextureImage();
-        //createTextureImageView();
-        //createTextureSampler();
         loadModel();
         createVertexBuffer();
         createIndexBuffer();
@@ -555,19 +542,19 @@ private:
         // mono rendering
         //VkPhysicalDeviceFeatures deviceFeatures{};
         //deviceFeatures.samplerAnisotropy = VK_TRUE;
-        //deviceFeatures.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
+        //deviceFeatures.fillModeNonSolid = VK_TRUE; // enable the wireframe feature.
 
         VkPhysicalDeviceMultiviewFeatures multiviewFeatures{};
         multiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
-        multiviewFeatures.multiview = VK_TRUE; // Enable the multiview feature, gl_ViewIndex 
-        //multiviewFeatures.multiviewTessellationShader = VK_TRUE;
+        multiviewFeatures.multiview = VK_TRUE; // enable the multiview feature, gl_ViewIndex 
+        //multiviewFeatures.multiviewTessellationShader = VK_TRUE; // no tessellation
 
 		VkPhysicalDeviceFeatures2 deviceFeatures2{}; // VkPhysicalDeviceFeatures2 is extended version of VkPhysicalDeviceFeatures
 		deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-		deviceFeatures2.pNext = &multiviewFeatures; // Link the multiview features to the device features chain.
+		deviceFeatures2.pNext = &multiviewFeatures; // link the multiview features to the device features chain
 		vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures2);
 		deviceFeatures2.features.samplerAnisotropy = VK_TRUE;
-		//deviceFeatures2.features.fillModeNonSolid = VK_TRUE; // Enable the wireframe feature.
+		//deviceFeatures2.features.fillModeNonSolid = VK_TRUE; // enable the wireframe feature
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -611,7 +598,7 @@ private:
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
         //createInfo.imageArrayLayers = 1;
-		createInfo.imageArrayLayers = 2; // Enable stereo rendering by setting imageArrayLayers to 2.
+		createInfo.imageArrayLayers = 2; // enable stereo rendering by setting imageArrayLayers to 2
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
@@ -705,7 +692,7 @@ private:
 
         std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
         VkRenderPassCreateInfo renderPassInfo{};
-		renderPassInfo.pNext = &multiviewCreateInfo; // Link the multiview create info to the render pass create info.
+		renderPassInfo.pNext = &multiviewCreateInfo; // link the multiview create info to the render pass create info
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
         renderPassInfo.pAttachments = attachments.data();
@@ -791,8 +778,8 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Change polygon mode to wireframe.
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        //rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // wireframe mode
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -949,46 +936,18 @@ private:
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
 
-    void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, 2);
-    }
-
-    void createTextureSampler() {
-        VkPhysicalDeviceProperties properties{};
-        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.anisotropyEnable = VK_TRUE;
-        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        samplerInfo.unnormalizedCoordinates = VK_FALSE;
-        samplerInfo.compareEnable = VK_FALSE;
-        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create texture sampler!");
-        }
-    }
-
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t layerCount) {
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
-        // Set viewType based on the layer count for flexibility
+        // set viewType based on the layer count for flexibility
         viewInfo.viewType = (layerCount > 1) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = format;
         viewInfo.subresourceRange.aspectMask = aspectFlags;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
         viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = layerCount; // Use the parameter here
+        viewInfo.subresourceRange.layerCount = layerCount; 
 
         VkImageView imageView;
         if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
@@ -1006,7 +965,7 @@ private:
         imageInfo.extent.height = height;
         imageInfo.extent.depth = 1;
         imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = arrayLayers; // Use the parameter here
+        imageInfo.arrayLayers = arrayLayers; 
         imageInfo.format = format;
         imageInfo.tiling = tiling;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1396,13 +1355,12 @@ private:
             throw std::runtime_error("failed to begin recording command buffer!");
         }
 
-        // --- GPU Timing Start ---
-        // 1. Reset the query pool for the current frame's queries.
+        // GPU timing
+        // reset the query pool for the current frame's queries
         vkCmdResetQueryPool(commandBuffer, queryPool, currentFrame * 2, 2);
 
-        // 2. Write the starting timestamp before any rendering work.
+        // write the starting timestamp before any rendering work
         vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, currentFrame * 2);
-        // -------------------------
 
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1420,7 +1378,7 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // --- All your drawing commands that you want to measure ---
+        // all drawing commands that you want to measure
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
         VkViewport viewport{};
@@ -1446,14 +1404,11 @@ private:
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
-        // --- End of drawing commands ---
 
         vkCmdEndRenderPass(commandBuffer);
 
-        // --- GPU Timing End ---
-        // 3. Write the ending timestamp after all rendering work is complete.
+        // write the ending timestamp after all rendering work is complete.
         vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, currentFrame * 2 + 1);
-        // -----------------------
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
@@ -1517,20 +1472,20 @@ private:
         //glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
         glm::vec3 forwardDirection = movingForward ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(0.0f, -1.0f, 0.0f);
         cameraPosition += forwardDirection * cameraSpeed * deltaTime;
-        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); // No lateral movement
+        cameraPosition = glm::vec3(cameraPosition.x, cameraPosition.y, 100.0f + cameraPosition.y * 0.006f); 
 
         glm::vec3 cameraTarget = cameraPosition + forwardDirection;
         glm::vec3 upVector = glm::vec3(0.0f, 0.0f, 1.0f);
         ubo.model = glm::mat4(1.0f);
 
         // stereo parameters
-        float ipd = 0.064f * 1.0f; // Interpupillary distance, sometimes deliberately exaggerated
+        float ipd = 0.064f * 1.0f; // interpupillary distance, sometimes deliberately exaggerated
         float centre = ipd * 0.5f;
 
         constexpr float fov = glm::radians(30.0f);
         float aspectRatio = swapChainExtent.width / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
-        float farPlane = 4000.0f; // Increased from 1000.0f
+        float farPlane = 4000.0f; // increased from 1000.0f
         glm::vec3 rightDir = glm::normalize(glm::cross(forwardDirection, glm::vec3(0.0f, 0.0f, 1.0f)));
 
         // frustum parameters
@@ -1558,7 +1513,7 @@ private:
         ubo.proj[1][1][1] *= -1;
         ubo.cameraPosition[1] = glm::vec4(rightEyePosition, 1.0f);
 
-        // Copy the data to the uniform buffer.
+        // copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1718,7 +1673,7 @@ private:
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-        // Ensure the device supports wireframe rendering (non-solid fill mode).
+        // ensure the device supports wireframe rendering, non-solid fill mode
         return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.fillModeNonSolid;
     }
 
@@ -1814,7 +1769,7 @@ private:
         std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
         std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
 
-        // Generate a single timestamp for all files.
+        // generate a single timestamp for all files
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
         std::tm time_info;
@@ -1858,7 +1813,7 @@ private:
             }
         }
 
-        // GPU Time Log
+        // GPU time Log
         if (!gpuTimeLog.empty()) {
             std::string filename = "gpu_times_" + timestamp + ".csv";
             std::ofstream dataFile(filename);

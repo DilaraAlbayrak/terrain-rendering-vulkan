@@ -14,9 +14,6 @@
 #define STB_EASY_FONT_IMPLEMENTATION
 #include <stb_easy_font.h>
 
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <tiny_obj_loader.h>
-
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -36,8 +33,8 @@
 #include <glm/gtx/compatibility.hpp>
 #include <glm/gtx/quaternion.hpp>
 
-const uint32_t WIDTH = 2400;
-const uint32_t HEIGHT = 1800;
+const uint32_t WIDTH = 1200;
+const uint32_t HEIGHT = 900;
 
 const std::string TEXTURE_PATH = "textures/apollo11_16bit.png";
 
@@ -89,7 +86,6 @@ struct SwapChainSupportDetails {
     std::vector<VkPresentModeKHR> presentModes;
 };
 
-// A structure to hold the calculated min/max coordinates.
 struct BoundingBox {
     glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
     glm::vec3 max = glm::vec3(std::numeric_limits<float>::lowest());
@@ -227,9 +223,6 @@ private:
     std::vector<Vertex> vertices;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
-    // std::vector<uint32_t> indices;
-    // VkBuffer indexBuffer;
-    // VkDeviceMemory indexBufferMemory;
 
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
@@ -245,18 +238,20 @@ private:
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
 
+    // BELOW LINES FOR CAMERA AND INTERACTION
+    // FOR TESSELLATION DEBUGGING PURPOSES
     // for camera movement/rotation by mouse
     glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);
-    float cameraDistance = 25000.0f; // Used for zoom, initial distance
+    float cameraDistance = 25000.0f; // used for zoom, initial distance
 
-    // For perspective-to-topdown transition
+    // for perspective-to-topdown transition
     float transitionFactor = 0.0f; // 0.0 = perspective, 1.0 = top-down
     bool isInteracting = false;
     double lastY = 0.0;
 
 	// horizontal camera movement
 	double lastX = 0.0;
-	float yaw = 0.0f; // Horizontal rotation around the Y-axis
+	float yaw = 0.0f; // horizontal rotation around the Y-axis
 
     glm::vec3 cameraPos = glm::vec3(100.0f, 100.0f, 50.0f);
     glm::vec3 cameraFront = glm::normalize(glm::vec3(0.0f, 0.0f, -1.0f));
@@ -267,8 +262,8 @@ private:
     bool framebufferResized = false;
 
     // for logging
-    int numFrames = 0;  // for debugging
-    int routeCount = 0; // for debugging
+    int numFrames = 0;  
+    int routeCount = 0; 
     int routeLimit = 5; // means num. routes is routeLimit + 1 
     bool loggingDone = false;
     std::vector<double> frameTimeLog;
@@ -287,6 +282,8 @@ private:
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 
+        // BELOW LINES FOR CAMERA AND INTERACTION
+        // FOR TESSELLATION DEBUGGING PURPOSES
         // register mouse callbacks
         glfwSetMouseButtonCallback(window, mouseButtonCallback);
         glfwSetCursorPosCallback(window, cursorPosCallback);
@@ -410,8 +407,6 @@ private:
         vkDestroyImage(device, textureImage, nullptr);
         vkFreeMemory(device, textureImageMemory, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        // vkDestroyBuffer(device, indexBuffer, nullptr);
-        // vkFreeMemory(device, indexBufferMemory, nullptr);
         vkDestroyBuffer(device, vertexBuffer, nullptr);
         vkFreeMemory(device, vertexBufferMemory, nullptr);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -545,11 +540,10 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        // Enable tessellation shader feature
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
-        deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
-        deviceFeatures.tessellationShader = VK_TRUE; // Enable tessellation
+        deviceFeatures.fillModeNonSolid = VK_TRUE; // for wireframe
+        deviceFeatures.tessellationShader = VK_TRUE; // enable tessellation
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -692,14 +686,13 @@ private:
         }
     }
 
-    // Find this function in your TerrainRenderer.cpp file
     void createDescriptorSetLayout() {
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
         uboLayoutBinding.descriptorCount = 1;
         uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         uboLayoutBinding.pImmutableSamplers = nullptr;
-        // The UBO is needed in the TCS and TES. This is correct.
+        // UBO is needed in the TCS and TES. This is correct
         uboLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
 
         VkDescriptorSetLayoutBinding samplerLayoutBinding{};
@@ -707,9 +700,7 @@ private:
         samplerLayoutBinding.descriptorCount = 1;
         samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
-        // CRITICAL CHANGE: The sampler is needed in the TES (for displacement)
-        // AND now also in the Fragment Shader (for normal calculation).
-        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; // <--- UPDATE THIS LINE
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; 
 
         std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -723,7 +714,6 @@ private:
     }
 
     void createGraphicsPipeline() {
-        // Load all four shader stages ---
         auto vertShaderCode = readFile("shaders/tess.vert.spv");
         auto fragShaderCode = readFile("shaders/tess.frag.spv");
         auto tescShaderCode = readFile("shaders/tess.tesc.spv");
@@ -772,14 +762,14 @@ private:
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        // Use a patch list for tessellation
+        // a patch list for tessellation
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-        // Tessellation state
+        // tessellation state
         VkPipelineTessellationStateCreateInfo tessellationState{};
         tessellationState.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
-        tessellationState.patchControlPoints = 4; // We are using quad patches
+        tessellationState.patchControlPoints = 4; // we are using quad patches
 
         VkPipelineViewportStateCreateInfo viewportState{};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -790,7 +780,7 @@ private:
         rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterizer.depthClampEnable = VK_FALSE;
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
-        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // Keep wireframe to see tessellation
+        rasterizer.polygonMode = VK_POLYGON_MODE_LINE; // keep wireframe to see tessellation
         //rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
@@ -845,7 +835,7 @@ private:
         pipelineInfo.pStages = shaderStages.data();
         pipelineInfo.pVertexInputState = &vertexInputInfo;
         pipelineInfo.pInputAssemblyState = &inputAssembly;
-        // Point to the new tessellation state
+        // point to the new tessellation state
         pipelineInfo.pTessellationState = &tessellationState;
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
@@ -945,17 +935,17 @@ private:
     void createTextureImage() {
         int texWidth, texHeight, texChannels;
 
-        // Load the 16bit image as single-channel (grayscale)
+        // Load the 16bit image as single-channel
         stbi_us* pixels = stbi_load_16(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_grey);
 
-        // load the 8-bit image as single-channel (grayscale)
+        // load the 8-bit image as single-channel
         // stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_grey);
 
         if (!pixels) {
             throw std::runtime_error("failed to load 16-bit texture image!");
         }
 
-        // Calculate image size for a single channel
+        // calculate image size for a single channel
         VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_us); // For 16-bit single-channel
         // VkDeviceSize imageSize = texWidth * texHeight * sizeof(stbi_uc); // For 8-bit single-channel
 
@@ -1160,8 +1150,8 @@ private:
         const float halfX = 2100.0f;
         const float halfY = 13965.0f;
 
-        const int grid = 128; // Number of patches in each direction
-        const int gridY = 128 * 7; // Number of patches in each direction
+		const int grid = 128; // number of patches along x axis
+        const int gridY = 128 * 7; 
 
         std::vector<Vertex> vertexList;
 
@@ -1443,7 +1433,7 @@ private:
 
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        // Use vkCmdDraw instead of vkCmdDrawIndexed 
+        // use vkCmdDraw instead of vkCmdDrawIndexed 
         //vkCmdDraw(commandBuffer, 4, 1, 0, 0); // for tessellation we draw 4 vertices directly
         vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
@@ -1474,42 +1464,6 @@ private:
             }
         }
     }
-
-    //void updateUniformBuffer(uint32_t currentImage)
-    //{
-    //    // State A: Perspective View (now dynamic based on yaw for rotation)
-    //    glm::vec3 pos_perspective;
-    //    float perspective_radius = 25000.0f; // The distance from the center for the side view
-    //    pos_perspective.x = cameraTarget.x + perspective_radius * sin(glm::radians(yaw));
-    //    pos_perspective.y = cameraTarget.y + perspective_radius * cos(glm::radians(yaw));
-    //    pos_perspective.z = cameraTarget.z +5000.0f; // Keep a fixed elevation for the side view
-    //    glm::vec3 up_perspective = glm::vec3(0.0f, 0.0f, 1.0f); // Z is up
-
-    //    // State B: Top-Down View
-    //    glm::vec3 pos_top_down = cameraTarget + glm::vec3(0.0f, 0.0f, cameraDistance);
-    //    glm::vec3 up_top_down = glm::vec3(0.0f, -1.0f, 0.0f);
-
-    //    // Interpolate camera position and up vector based on the transitionFactor
-    //    this->cameraPos = glm::lerp(pos_perspective, pos_top_down, transitionFactor);
-    //    this->cameraUp = glm::normalize(glm::lerp(up_perspective, up_top_down, transitionFactor));
-
-    //    UniformBufferObject ubo{};
-    //    ubo.model = glm::mat4(1.0f);
-
-    //    // The view matrix is now calculated using the interpolated values
-    //    ubo.view = glm::lookAt(this->cameraPos, this->cameraTarget, this->cameraUp);
-
-    //    // Projection matrix setup
-    //    float aspect = swapChainExtent.width / (float)swapChainExtent.height;
-    //    ubo.proj = glm::perspective(glm::radians(30.0f), aspect, 0.1f, 60000.0f);
-    //    ubo.proj[1][1] *= -1; // Vulkan's Y-coordinate is inverted
-
-    //    // Pass camera world position to the shader
-    //    ubo.cameraPosition = glm::vec4(this->cameraPos, 1.0f);
-
-    //    // Copy the data to the uniform buffer
-    //    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-    //}
 
     void updateUniformBuffer(uint32_t currentImage)
     {
@@ -1562,16 +1516,15 @@ private:
         constexpr float fov = glm::radians(30.0f);
         float aspect = swapChainExtent.width / (float)swapChainExtent.height;
         float nearPlane = 0.1f;
-        float farPlane = 4000.0f; // Increased from 1000.0f
+        float farPlane = 4000.0f; // increased from 1000.0f
         ubo.proj = glm::perspective(fov, aspect, nearPlane, farPlane);
 
-        // This correction is for Vulkan's inverted Y-axis in its clip space. Keep it.
+        // this correction is for Vulkan's inverted Y-axis in its clip space
         ubo.proj[1][1] *= -1;
 
-        // Pass the camera's world position to the shader (useful for lighting calculations).
+        // pass the camera's world position to the shader for lighting calculations
         ubo.cameraPosition = glm::vec4(cameraPosition, 1.0f);
 
-        // Copy the data to the uniform buffer.
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1717,7 +1670,7 @@ private:
         VkPhysicalDeviceFeatures supportedFeatures;
         vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-        // Check for tessellation shader support ---
+        // check for tessellation shader support
         return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy && supportedFeatures.tessellationShader && supportedFeatures.fillModeNonSolid;
 
     }
@@ -1819,7 +1772,7 @@ private:
         std::cout << ">> Number of frameTimeLog: " << frameTimeLog.size() << std::endl;
         std::cout << ">> Number of fpsLog: " << fpsLog.size() << std::endl;
 
-        // Generate a single timestamp for all files.
+        // generate a single timestamp for all files.
         auto now = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
         std::tm time_info;
@@ -1863,7 +1816,7 @@ private:
             }
         }
 
-        // GPU Time Log
+        // GPU time Log
         if (!gpuTimeLog.empty()) {
             std::string filename = "gpu_times_" + timestamp + ".csv";
             std::ofstream dataFile(filename);
@@ -1876,9 +1829,11 @@ private:
         }
     }
 
+    // BELOW METHODS FOR CAMERA AND INTERACTION
+    // FOR TESSELLATION DEBUGGING PURPOSES
     void processKeyboardInput()
     {
-        // Adjust this value to change how fast the camera pans up and down
+        // adjust this value to change how fast the camera pans up and down
         const float cameraPanSpeed = 10.0f;
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
@@ -1894,7 +1849,7 @@ private:
         if (button == GLFW_MOUSE_BUTTON_LEFT) {
             if (action == GLFW_PRESS) {
                 app->isInteracting = true;
-                // Capture both X and Y cursor positions
+                // capture both X and Y cursor positions
                 glfwGetCursorPos(window, &app->lastX, &app->lastY);
             }
             else if (action == GLFW_RELEASE) {
@@ -1909,21 +1864,21 @@ private:
             return;
         }
 
-        // Calculate horizontal and vertical mouse movement since last frame
+        // calculate horizontal and vertical mouse movement since last frame
         float xoffset = static_cast<float>(xpos - app->lastX);
         float yoffset = static_cast<float>(ypos - app->lastY);
         app->lastX = xpos;
         app->lastY = ypos;
 
-        // Horizontal movement (left/right) controls yaw rotation
+        // horizontal movement controls yaw rotation
         float rotationSensitivity = 0.15f;
         app->yaw += xoffset * rotationSensitivity;
 
-        // Vertical movement (up/down) controls transition to top-down view
+        // vertical movement controls transition to top-down view
         float transitionSensitivity = 0.005f;
         app->transitionFactor += yoffset * transitionSensitivity;
 
-        // Clamp the transition factor between 0.0 and 1.0
+        // clamp the transition factor between 0.0 and 1.0
         app->transitionFactor = std::clamp(app->transitionFactor, 0.0f, 1.0f);
     }
 

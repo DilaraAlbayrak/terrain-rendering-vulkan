@@ -24,97 +24,97 @@
     <None Include="packages.config" />
     <CustomBuild Include="shaders\multipass.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipass.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipass_tess.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipass_tess.tesc">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipass_tess.tese">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipass_tess.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\shader.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\shader.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\singlepass.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\singlepass.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\tess.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\tess.tesc">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\tess.tese">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\tess.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipassVR.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
     <CustomBuild Include="shaders\multipassVR.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">d:\VulkanSDK\1.4.313.1\Bin\glslc.exe %(Identity) -o %(Identity).spv</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity).spv</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
     </CustomBuild>
@@ -135,7 +135,9 @@
     <ClCompile Include="TerrainRenderer_tessellation.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="TerrainRenderer_VR.cpp" />
+    <ClCompile Include="TerrainRenderer_VR.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -249,7 +251,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\914607\Workspace\Software\tinyobjloader-release;C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Include;C:\Users\914607\Workspace\Software\glfw-3.4.bin.WIN64\include;C:\Users\914607\Workspace\Software\stb-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>d:\Software\tinyobjloader-release;d:\VulkanSDK\1.4.313.1\Include;d:\Software\glfw-3.4.bin.WIN64\include;d:\Software\stb-master;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
@@ -257,7 +259,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\Users\914607\Workspace\Software\glfw-3.4.bin.WIN64\lib-vc2022;C:\Users\914607\Workspace\VulkanSDK\1.4.313.1\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>d:\Software\glfw-3.4.bin.WIN64\lib-vc2022;d:\VulkanSDK\1.4.313.1\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
